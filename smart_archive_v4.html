@@ -722,13 +722,22 @@ function renderList() {
       </div>`;
     }).join('');
   } else if (currentTab === 'memo') {
+    const ytItems = items.filter(i => i.type === '유튜브링크' && i.url);
     const groupBtn = items.length >= 2
-      ? `<button class="btn btn-secondary" style="width:100%;font-size:12px;margin-bottom:10px" onclick="showGroupedView()">📋 ${items.length}개 항목 모아 보기 · AI 분석</button>`
+      ? `<button class="btn btn-secondary" style="width:100%;font-size:12px;margin-bottom:6px" onclick="showGroupedView()">📋 ${items.length}개 항목 모아 보기 · AI 분석</button>`
       : '';
-    container.innerHTML = groupBtn + items.map(item => {
+    const ytAllBtn = ytItems.length >= 1
+      ? `<button class="btn btn-primary" style="width:100%;font-size:12px;margin-bottom:10px;background:linear-gradient(135deg,#FF0000,#cc0000)" onclick="copyAllYouTubePrompts()">🎬 YouTube ${ytItems.length}개 전체 분석 프롬프트 복사</button>`
+      : '';
+    container.innerHTML = groupBtn + ytAllBtn + items.map(item => {
       const isYt = item.type === '유튜브링크' && item.url;
       const ytId = isYt ? extractYouTubeId(item.url) : null;
       const thumb = ytId ? `<img src="https://img.youtube.com/vi/${ytId}/mqdefault.jpg" style="width:100%;border-radius:6px;margin-bottom:6px;aspect-ratio:16/9;object-fit:cover">` : '';
+      const ytBtn = isYt
+        ? `<div style="margin-top:8px" onclick="event.stopPropagation()">
+             <button class="btn btn-primary" style="width:100%;font-size:11px;padding:5px;background:#FF0000;border-color:#FF0000" onclick="copyMemoAnalysisPrompt('${item.id}')">🤖 YouTube 분석 프롬프트 복사</button>
+           </div>`
+        : '';
       return `<div class="card ${selectedId===item.id?'active':''}" onclick="selectItem('${item.id}')">
         ${thumb}
         <div class="card-badges">
@@ -737,6 +746,7 @@ function renderList() {
         </div>
         <div class="card-title">${item.title}</div>
         <div class="card-meta"><span>${item.savedAt||''}</span></div>
+        ${ytBtn}
       </div>`;
     }).join('');
   } else if (currentTab === 'calls') {
@@ -882,9 +892,15 @@ function renderDetail(id) {
         <div class="detail-text">${item.content.replace(/</g,'&lt;').replace(/\n/g,'<br>')}</div>
       </div>` : ''}
       ${item.url && !isYt ? `<div class="detail-section"><div class="detail-section-title">링크</div><a href="${item.url}" target="_blank">${item.url}</a></div>` : ''}
+      ${isYt && !item.aiSummary ? `<div class="detail-section" style="border:1px solid #FF000040;border-radius:8px;padding:12px;background:#FF000008">
+        <div class="detail-section-title" style="color:#FF0000">🤖 YouTube 분석 프롬프트</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">아래 프롬프트를 복사해서 Claude에 붙여넣기 하세요</div>
+        <textarea class="memo-input" id="yt-prompt-preview" readonly style="font-size:11px;min-height:100px;background:var(--bg-secondary);color:var(--text-muted)">${buildYouTubePrompt(item)}</textarea>
+        <button class="btn btn-primary" style="margin-top:6px;width:100%;background:#FF0000;border-color:#FF0000" onclick="copyMemoAnalysisPrompt('${id}')">📋 프롬프트 복사</button>
+      </div>` : ''}
       <div class="detail-section">
         <div class="detail-section-title">AI 요약</div>
-        <div class="detail-text" id="detail-ai-summary">${item.aiSummary ? item.aiSummary.replace(/</g,'&lt;').replace(/\n/g,'<br>') : '<span style="color:var(--text-muted)">요약 없음 — 아래 버튼으로 프롬프트 복사 → Claude 결과 붙여넣기</span>'}</div>
+        <div class="detail-text" id="detail-ai-summary">${item.aiSummary ? item.aiSummary.replace(/</g,'&lt;').replace(/\n/g,'<br>') : '<span style="color:var(--text-muted)">요약 없음 — 위 프롬프트 복사 → Claude에서 분석 → 아래에 붙여넣기</span>'}</div>
       </div>
       <div id="ai-summary-edit-area" style="margin-top:4px">
         <textarea class="memo-input" id="ai-summary-input" placeholder="Claude에서 생성한 요약을 붙여넣으세요...">${item.aiSummary||''}</textarea>
@@ -2080,15 +2096,31 @@ function addDetailTagKey(e, tabKey, id, input) {
 }
 
 /* ---- YouTube analysis prompt ---- */
+function buildYouTubePrompt(item) {
+  return `다음 유튜브 영상 내용을 분석해줘.\n\n제목: ${item.title}\nURL: ${item.url||''}\n메모: ${item.content||'없음'}\n태그: ${(item.tags||[]).join(', ')||'없음'}\n\n분석 항목:\n1. 핵심 요약 5줄\n2. 주요 인사이트 3가지\n3. 실용적 적용 방법\n4. 관련 키워드 5개`;
+}
+
 function copyMemoAnalysisPrompt(id) {
   const items = getData(KEYS.memo);
   const item = items.find(i=>i.id===id);
   if (!item) return;
   const isYt = item.type === '유튜브링크';
   const prompt = isYt
-    ? `다음 유튜브 영상 내용을 분석해줘.\n\n제목: ${item.title}\nURL: ${item.url||''}\n메모: ${item.content||''}\n\n분석 항목:\n1. 핵심 요약 5줄\n2. 주요 인사이트\n3. 실용적 적용 방법\n4. 관련 키워드 5개`
+    ? buildYouTubePrompt(item)
     : `다음 메모를 분석하고 정리해줘.\n\n제목: ${item.title}\n유형: ${item.type}\n내용:\n${item.content||''}\n\n분석 항목:\n1. 핵심 요약\n2. 주요 포인트\n3. 액션 아이템`;
   copyToClipboard(prompt);
+  toast(isYt ? 'YouTube 분석 프롬프트 복사됨 — Claude에 붙여넣기 하세요' : 'AI 분석 프롬프트 복사됨');
+}
+
+function copyAllYouTubePrompts() {
+  const items = getFilteredItems().filter(i => i.type === '유튜브링크' && i.url);
+  if (!items.length) { toast('YouTube 링크 항목이 없습니다'); return; }
+  const lines = items.map((item, idx) =>
+    `[${idx+1}] 제목: ${item.title}\n    URL: ${item.url}\n    메모: ${item.content||'없음'}\n    태그: ${(item.tags||[]).join(', ')||'없음'}`
+  ).join('\n\n');
+  const prompt = `다음 ${items.length}개의 유튜브 영상을 분석해줘.\n각 영상에 대해 아래 형식으로 정리해줘:\n\n분석 형식:\n• 핵심 요약 (3줄)\n• 주요 인사이트 (3개)\n• 실용적 적용 방법\n• 핵심 키워드 5개\n\n---\n${lines}\n---\n\n위 ${items.length}개 영상을 순서대로 분석해줘.`;
+  copyToClipboard(prompt);
+  toast(`YouTube ${items.length}개 분석 프롬프트 복사됨 — Claude에 붙여넣기 하세요`);
 }
 
 function editAiSummary(tab, id) {
