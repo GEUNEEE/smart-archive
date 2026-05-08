@@ -377,7 +377,8 @@ const DEFAULT_SETTINGS = {
   ],
   callTypes: ['미팅','상담','브레인스토밍','업무협의','기타'],
   imageCategories: ['레퍼런스','콘텐츠아이디어','디자인','스크린샷','기타'],
-  memoTypes: ['유튜브링크','인스타링크','아이디어','생각정리','기타링크','메모']
+  memoTypes: ['유튜브링크','인스타링크','아이디어','생각정리','기타링크','메모'],
+  geminiApiKey: ''
 };
 
 /* ============================================================
@@ -726,16 +727,18 @@ function renderList() {
     const groupBtn = items.length >= 2
       ? `<button class="btn btn-secondary" style="width:100%;font-size:12px;margin-bottom:6px" onclick="showGroupedView()">📋 ${items.length}개 항목 모아 보기 · AI 분석</button>`
       : '';
+    const hasGemini = !!(getSettings().geminiApiKey);
     const ytAllBtn = ytItems.length >= 1
-      ? `<button class="btn btn-primary" style="width:100%;font-size:12px;margin-bottom:10px;background:linear-gradient(135deg,#FF0000,#cc0000)" onclick="copyAllYouTubePrompts()">🎬 YouTube ${ytItems.length}개 전체 분석 프롬프트 복사</button>`
+      ? `<button class="btn btn-primary" style="width:100%;font-size:12px;margin-bottom:10px;background:linear-gradient(135deg,#FF0000,#cc0000)" onclick="${hasGemini ? 'autoAnalyzeAllYouTube()' : 'copyAllYouTubePrompts()'}">🤖 YouTube ${ytItems.length}개 ${hasGemini ? '전체 자동 분석' : '전체 분석 프롬프트 복사'}</button>`
       : '';
     container.innerHTML = groupBtn + ytAllBtn + items.map(item => {
       const isYt = item.type === '유튜브링크' && item.url;
       const ytId = isYt ? extractYouTubeId(item.url) : null;
       const thumb = ytId ? `<img src="https://img.youtube.com/vi/${ytId}/mqdefault.jpg" style="width:100%;border-radius:6px;margin-bottom:6px;aspect-ratio:16/9;object-fit:cover">` : '';
+      const hasGeminiCard = !!(getSettings().geminiApiKey);
       const ytBtn = isYt
         ? `<div style="margin-top:8px" onclick="event.stopPropagation()">
-             <button class="btn btn-primary" style="width:100%;font-size:11px;padding:5px;background:#FF0000;border-color:#FF0000" onclick="copyMemoAnalysisPrompt('${item.id}')">🎬 분석 프롬프트 복사</button>
+             <button class="btn btn-primary" style="width:100%;font-size:11px;padding:5px;background:#FF0000;border-color:#FF0000" onclick="${hasGeminiCard ? `autoAnalyzeYouTube('${item.id}')` : `copyMemoAnalysisPrompt('${item.id}')`}">${hasGeminiCard ? '🤖 자동 분석' : '🎬 분석 프롬프트 복사'}</button>
            </div>`
         : '';
       return `<div class="card ${selectedId===item.id?'active':''}" onclick="selectItem('${item.id}')">
@@ -802,6 +805,12 @@ function selectItem(id) {
   selectedId = id;
   renderList();
   renderDetail(id);
+  if (currentTab === 'memo') {
+    const item = getData(KEYS.memo).find(i => i.id === id);
+    if (item?.type === '유튜브링크' && !item.aiSummary && getSettings().geminiApiKey) {
+      setTimeout(() => autoAnalyzeYouTube(id), 400);
+    }
+  }
 }
 
 function renderDetail(id) {
@@ -911,7 +920,10 @@ function renderDetail(id) {
       </div>
       <div class="detail-section"><div class="detail-section-title">저장일</div><div class="detail-text">${item.savedAt||'-'}</div></div>
       <div class="action-bar">
-        <button class="btn btn-primary" onclick="copyMemoAnalysisPrompt('${id}')">${isYt ? '🎬 YouTube 분석 프롬프트 복사' : '🤖 AI 분석 프롬프트 복사'}</button>
+        ${isYt && getSettings().geminiApiKey
+          ? `<button class="btn btn-primary" style="background:#FF0000;border-color:#FF0000" onclick="autoAnalyzeYouTube('${id}')">🤖 YouTube 자동 분석</button>`
+          : `<button class="btn btn-primary" onclick="copyMemoAnalysisPrompt('${id}')">${isYt ? '🎬 YouTube 분석 프롬프트 복사' : '🤖 AI 분석 프롬프트 복사'}</button>`
+        }
         <button class="btn btn-secondary" onclick="copyMemoPrompt('${id}')">✍️ 글 작성</button>
         <button class="btn btn-danger" onclick="deleteItem('memo','${id}')">🗑 삭제</button>
       </div>`;
@@ -1574,6 +1586,24 @@ function renderSettings() {
   ).join(' ');
 
   let html = `
+  <div class="settings-section" style="border-color:#4285F4">
+    <div class="settings-section-title">🤖 YouTube AI 자동 분석</div>
+    <div class="form-group">
+      <label class="form-label">Gemini API Key <span style="font-size:11px;color:var(--text-muted)">(무료 · 카드 불필요)</span></label>
+      <div style="display:flex;gap:8px">
+        <input class="form-input" id="gemini-api-key" type="password" placeholder="AIzaSy..." value="${(s.geminiApiKey||'').replace(/"/g,'&quot;')}" style="flex:1;font-family:monospace">
+        <button class="btn btn-primary" onclick="saveGeminiApiKey()">저장</button>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:6px;line-height:1.6">
+        발급: <b>aistudio.google.com</b> → Get API Key (Google 계정, 무료)<br>
+        저장 후 YouTube 카드 클릭 시 자동 분석 · 요약이 저장됩니다.
+      </div>
+    </div>
+    <div style="font-size:13px;margin-top:4px;${s.geminiApiKey ? 'color:#10B981' : 'color:#F59E0B'}">
+      ${s.geminiApiKey ? '✅ 설정됨 — YouTube 자동 분석 활성화' : '⚠️ 미설정 — 프롬프트 복사 방식으로 동작'}
+    </div>
+  </div>
+
   <div class="settings-section">
     <div class="settings-section-title">📡 채널 관리</div>
     ${s.channels.map((ch,i) => `
@@ -2087,6 +2117,100 @@ function addDetailTagKey(e, tabKey, id, input) {
     renderTagStrip();
     renderList();
   }
+}
+
+/* ---- Gemini API Key ---- */
+function saveGeminiApiKey() {
+  const key = document.getElementById('gemini-api-key').value.trim();
+  const s = getSettings();
+  s.geminiApiKey = key;
+  saveSettings(s);
+  renderSettings();
+  toast(key ? 'Gemini API 키 저장됨 — YouTube 자동 분석 활성화' : 'API 키 삭제됨');
+}
+
+/* ---- YouTube auto-analyze via Gemini ---- */
+async function autoAnalyzeYouTube(id) {
+  const items = getData(KEYS.memo);
+  const item = items.find(i => i.id === id);
+  if (!item) return;
+
+  const apiKey = getSettings().geminiApiKey;
+  if (!apiKey) { copyMemoAnalysisPrompt(id); return; }
+
+  const summaryEl = document.getElementById('detail-ai-summary');
+  if (summaryEl) summaryEl.innerHTML = '<span style="color:var(--text-muted)">⏳ Gemini 분석 중...</span>';
+  toast('YouTube 자동 분석 중...');
+
+  try {
+    let title = item.title, channel = '';
+    try {
+      const oe = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(item.url)}&format=json`);
+      if (oe.ok) { const d = await oe.json(); title = d.title||title; channel = d.author_name||''; }
+    } catch(e) {}
+
+    const textPrompt = `다음 YouTube 영상을 분석해서 한국어로 요약해줘.\n\n제목: ${title}\n채널: ${channel}\nURL: ${item.url}\n${item.content ? '내 메모: '+item.content : ''}\n\n아래 형식으로 작성:\n## 핵심 요약\n(3~5줄)\n\n## 주요 인사이트\n• \n• \n• \n\n## 실용적 적용\n• \n\n## 핵심 키워드\n#키워드1 #키워드2 #키워드3`;
+
+    const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+    // 1차 시도: YouTube URL을 fileData로 직접 전달 (Gemini가 영상 내용 직접 분석)
+    let summary = null;
+    const res1 = await fetch(GEMINI_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        contents: [{parts: [
+          {text: textPrompt},
+          {fileData: {fileUri: item.url, mimeType: 'video/mp4'}}
+        ]}]
+      })
+    }).catch(() => null);
+
+    if (res1 && res1.ok) {
+      const d = await res1.json();
+      summary = d.candidates?.[0]?.content?.parts?.[0]?.text || null;
+    }
+
+    // 2차 시도: 텍스트만으로 (title + URL 기반 분석)
+    if (!summary) {
+      const res2 = await fetch(GEMINI_URL, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({contents: [{parts: [{text: textPrompt}]}]})
+      });
+      if (!res2.ok) {
+        const err = await res2.json().catch(() => ({}));
+        throw new Error(err.error?.message || `Gemini API 오류 ${res2.status}`);
+      }
+      const d2 = await res2.json();
+      summary = d2.candidates?.[0]?.content?.parts?.[0]?.text;
+    }
+
+    if (!summary) throw new Error('응답이 비어있습니다');
+
+    item.aiSummary = summary;
+    saveData(KEYS.memo, items);
+    renderDetail(id);
+    toast('✅ 자동 분석 완료!');
+  } catch(e) {
+    if (summaryEl) summaryEl.innerHTML = `<span style="color:#EF4444">분석 실패: ${e.message}</span>`;
+    toast('분석 실패: ' + e.message);
+  }
+}
+
+async function autoAnalyzeAllYouTube() {
+  const apiKey = getSettings().geminiApiKey;
+  if (!apiKey) { toast('⚙️ 설정에서 Gemini API 키를 먼저 입력하세요'); switchTab('settings'); return; }
+  const pending = getData(KEYS.memo).filter(i => i.type === '유튜브링크' && i.url && !i.aiSummary);
+  if (!pending.length) { toast('분석할 항목이 없습니다 (이미 모두 완료)'); return; }
+  toast(`YouTube ${pending.length}개 자동 분석 시작...`);
+  for (let i = 0; i < pending.length; i++) {
+    toast(`분석 중 ${i+1}/${pending.length}: ${pending[i].title.substring(0,20)}...`);
+    await autoAnalyzeYouTube(pending[i].id);
+    if (i < pending.length - 1) await new Promise(r => setTimeout(r, 2000));
+  }
+  toast(`✅ YouTube ${pending.length}개 분석 완료!`);
+  renderList();
 }
 
 /* ---- YouTube analysis prompt ---- */
