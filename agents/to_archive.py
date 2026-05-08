@@ -14,14 +14,15 @@ from datetime import datetime
 from pathlib import Path
 
 
-OUTPUT_DIR = Path(__file__).parent
+OUTPUT_DIR  = Path(__file__).parent
+IMPORTS_DIR = Path(__file__).parent.parent / "imports"  # 레포 루트/imports/latest.json
 
 
 def generate_archive_json(items: list[dict], output_path: str = None) -> str:
     """
     items: 수집기에서 받은 dict 목록 (channel, title, type, url, ... 포함)
     output_path: 저장 경로 (None이면 자동 생성)
-    반환값: 저장된 파일 경로
+    반환값: 저장된 파일 경로 (dated)
     """
     now = datetime.now()
     date_str = now.strftime("%Y-%m-%d")
@@ -63,6 +64,11 @@ def generate_archive_json(items: list[dict], output_path: str = None) -> str:
         output_path = str(OUTPUT_DIR / f"archive_import_{date_str}.json")
 
     with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    # GitHub Pages 자동 가져오기용 — imports/latest.json 에도 저장
+    IMPORTS_DIR.mkdir(exist_ok=True)
+    with open(IMPORTS_DIR / "latest.json", "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
     return output_path

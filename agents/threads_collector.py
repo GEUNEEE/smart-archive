@@ -8,6 +8,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
@@ -46,17 +47,31 @@ async def collect_threads(max_items: int = None) -> list[dict]:
 
             seen_urls: set[str] = set()
 
-            # 홈피드 + 탐색(추천) 탭 두 곳 수집
-            collect_pages = [
-                ("홈피드", "https://www.threads.com/"),
-                ("탐색",   "https://www.threads.com/explore/"),
+            keywords = [
+                k.strip()
+                for k in os.getenv("SNS_KEYWORDS", "마케팅,퍼스널브랜딩").split(",")
+                if k.strip()
             ]
 
-            for page_name, page_url in collect_pages:
+            # 홈피드 + 탐색 + 키워드 검색
+            collect_pages = [
+                ("홈피드", "https://www.threads.com/",          20),
+                ("탐색",   "https://www.threads.com/explore/",  15),
+            ]
+            for kw in keywords:
+                collect_pages.append((
+                    f"검색:{kw}",
+                    f"https://www.threads.com/search/?q={quote(kw)}",
+                    10,
+                ))
+
+            for page_name, page_url, max_scroll in collect_pages:
                 if len(items) >= max_items:
                     break
 
-                if page.url.rstrip("/") != page_url.rstrip("/"):
+                cur = page.url.split("?")[0].rstrip("/")
+                tgt = page_url.split("?")[0].rstrip("/")
+                if cur != tgt:
                     await page.goto(page_url, wait_until="load", timeout=30_000)
                     try:
                         await page.wait_for_selector('a[href*="/post/"]', timeout=10_000)
@@ -66,7 +81,7 @@ async def collect_threads(max_items: int = None) -> list[dict]:
 
                 scroll_round = 0
 
-                while len(items) < max_items and scroll_round < 20:
+                while len(items) < max_items and scroll_round < max_scroll:
                     posts = await page.evaluate(_EXTRACT_POSTS_JS)
 
                     for post in posts:

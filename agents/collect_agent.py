@@ -10,6 +10,7 @@
 """
 import asyncio
 import os
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -76,7 +77,7 @@ async def run():
     else:
         log("Sheets 업로드 건너뜀 (SPREADSHEET_ID 미설정)")
 
-    # ── archive_import.json 생성 ──────────────────────────
+    # ── archive_import.json 생성 + GitHub 자동 push ───────
     json_path = ""
     if all_items:
         try:
@@ -86,6 +87,14 @@ async def run():
         except Exception as exc:
             log(f"[오류] JSON 생성 실패: {exc}")
             errors.append(f"JSON 생성 실패: {exc}")
+
+        # imports/latest.json 을 GitHub Pages에 자동 push
+        if json_path:
+            try:
+                _git_push_imports()
+                log("GitHub Pages 자동 업데이트 완료 (imports/latest.json)")
+            except Exception as exc:
+                log(f"[경고] git push 실패 (수동 push 필요): {exc}")
 
     # ── Telegram 알림 ─────────────────────────────────────
     if os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_CHAT_ID"):
@@ -122,6 +131,31 @@ async def _run_collector(platform: str) -> list[dict]:
         return await collect_instagram_async()
 
     return []
+
+
+def _git_push_imports():
+    """imports/latest.json 을 GitHub에 커밋·push해서 GitHub Pages 자동 업데이트"""
+    repo_root = Path(__file__).parent.parent
+    today = datetime.now().strftime("%Y-%m-%d")
+    subprocess.run(
+        ["git", "-C", str(repo_root), "add", "imports/latest.json"],
+        check=True, capture_output=True,
+    )
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "status", "--porcelain", "imports/latest.json"],
+        capture_output=True, text=True,
+    )
+    if not result.stdout.strip():
+        log("imports/latest.json 변경 없음 — push 건너뜀")
+        return
+    subprocess.run(
+        ["git", "-C", str(repo_root), "commit", "-m", f"chore: auto-update imports {today}"],
+        check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo_root), "push"],
+        check=True, capture_output=True,
+    )
 
 
 def _channel_emoji(name: str) -> str:

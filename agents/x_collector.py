@@ -1,12 +1,14 @@
 """
 X (Twitter) 수집기 (Playwright)
-로그인된 Chrome 프로필 세션 재사용
+- 홈피드 + 트렌딩 + 키워드 검색(Top) 수집
+- 조회수 50만 이상 필터 (MIN_VIEWS_X)
+- 로그인된 Chrome 프로필 세션 재사용
 """
 import asyncio
 import os
-import re
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
@@ -16,11 +18,30 @@ load_dotenv(Path(__file__).parent / ".env")
 
 
 async def collect_x(max_items: int = None) -> list[dict]:
-    max_items = max_items or int(os.getenv("MAX_ITEMS_PER_PLATFORM", "15"))
-    min_likes = int(os.getenv("MIN_LIKES", "500"))
+    max_items   = max_items or int(os.getenv("MAX_ITEMS_PER_PLATFORM", "15"))
+    min_views   = int(os.getenv("MIN_VIEWS_X", "500000"))
+    min_likes   = int(os.getenv("MIN_LIKES", "1000"))   # views=0일 때 대체 기준
     profile_path = os.getenv("CHROME_PROFILE_PATH", "C:/Chrome_Profile_Archive")
 
-    items = []
+    keywords = [
+        k.strip()
+        for k in os.getenv("SNS_KEYWORDS", "마케팅,퍼스널브랜딩").split(",")
+        if k.strip()
+    ]
+
+    # 수집 페이지 목록: (이름, URL, 최대 스크롤 횟수)
+    collect_pages = [
+        ("홈피드",  "https://x.com/home",                    20),
+        ("트렌딩",  "https://x.com/explore/tabs/trending",   15),
+    ]
+    for kw in keywords:
+        collect_pages.append((
+            f"검색:{kw}",
+            f"https://x.com/search?q={quote(kw)}&src=typed_query&f=top",
+            10,
+        ))
+
+    items: list[dict] = []
 
     async with async_playwright() as p:
         ctx = await p.chromium.launch_persistent_context(
@@ -47,17 +68,11 @@ async def collect_x(max_items: int = None) -> list[dict]:
 
             seen_urls: set[str] = set()
 
-            # 수집할 페이지 목록: 홈피드 + 탐색(트렌딩)
-            collect_pages = [
-                ("홈피드",   "https://x.com/home"),
-                ("탐색",     "https://x.com/explore/tabs/trending"),
-            ]
-
-            for page_name, page_url in collect_pages:
+            for page_name, page_url, max_scroll in collect_pages:
                 if len(items) >= max_items:
                     break
 
-                if page.url != page_url:
+                if page.url.split("?")[0] != page_url.split("?")[0]:
                     await page.goto(page_url, wait_until="load", timeout=30_000)
                     try:
                         await page.wait_for_selector('article[data-testid="tweet"]', timeout=10_000)
@@ -66,9 +81,8 @@ async def collect_x(max_items: int = None) -> list[dict]:
                     await page.wait_for_timeout(2000)
 
                 scroll_round = 0
-                per_page_limit = max_items // len(collect_pages) + 10
 
-                while len(items) < max_items and scroll_round < 20:
+                while len(items) < max_items and scroll_round < max_scroll:
                     posts = await page.evaluate(_EXTRACT_POSTS_JS)
 
                     for post in posts:
@@ -81,9 +95,16 @@ async def collect_x(max_items: int = None) -> list[dict]:
                         if len(text) < 15:
                             continue
 
-                        likes = int(post.get("likes", 0))
-                        if likes < min_likes:
-                            continue
+                        views  = int(post.get("views", 0))
+                        likes  = int(post.get("likes", 0))
+
+                        # 조회수 필터: views 있으면 50만 이상, 없으면 좋아요 기준
+                        if views > 0:
+                            if views < min_views:
+                                continue
+                        else:
+                            if likes < min_likes:
+                                continue
 
                         items.append(_make_item(
                             channel="X",
@@ -91,7 +112,7 @@ async def collect_x(max_items: int = None) -> list[dict]:
                             content=text,
                             author=post.get("author", ""),
                             url=url,
-                            views=int(post.get("views", 0)),
+                            views=views,
                             likes=likes,
                             comments=int(post.get("comments", 0)),
                         ))
@@ -145,7 +166,7 @@ _EXTRACT_POSTS_JS = """() => {
             const likes    = parseCount('like');
             const comments = parseCount('reply');
 
-            // 조회수 (analytics 링크 안의 숫자)
+            // 조회수 (analytics 링크)
             let views = 0;
             const analyticsEl = article.querySelector('a[href*="/analytics"]');
             if (analyticsEl) {
@@ -167,6 +188,7 @@ if __name__ == "__main__":
     print(f"X 수집: {len(results)}개")
     for r in results[:5]:
         try:
-            print(f"  [{r['likes']}likes | {r['views']}views] {r['title'][:60]}")
+            views_str = f"{r['views']:,}" if r['views'] else "N/A"
+            print(f"  [{r['likes']:,}likes | {views_str}views] {r['title'][:60]}")
         except UnicodeEncodeError:
             print(f"  [{r['likes']}likes] (encoding error)")
