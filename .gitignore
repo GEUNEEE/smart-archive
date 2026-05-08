@@ -8,3 +8,13 @@ Thumbs.db
 
 # Backup
 *.bak
+
+# Python
+agents/__pycache__/
+agents/*.pyc
+agents/.env
+agents/collect_log.txt
+agents/archive_import_*.json
+agents/threads_debug*.html
+agents/debug_*.py
+agents/analyze_html.py
