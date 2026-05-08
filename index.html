@@ -222,6 +222,12 @@ select.form-input{appearance:none;}
 .parsed-content-preview{font-size:12px;color:var(--text-muted);background:var(--bg-primary);border-radius:6px;padding:8px 10px;line-height:1.6;max-height:80px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;}
 .parsed-type-select{font-size:12px;padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);}
 .parsed-url-tag{font-size:11px;color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px;display:inline-block;vertical-align:middle;}
+.topic-input-wrap{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;}
+.topic-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;background:var(--accent);color:#fff;}
+.topic-chip-del{cursor:pointer;font-size:12px;line-height:1;opacity:.8;}
+.topic-chip-del:hover{opacity:1;}
+.topic-add-input{font-size:12px;padding:3px 8px;border-radius:6px;border:1px dashed var(--border);background:transparent;color:var(--text-secondary);width:100px;}
+.topic-add-input:focus{outline:none;border-color:var(--accent);color:var(--text-primary);}
 </style>
 </head>
 <body>
@@ -1939,18 +1945,39 @@ function guessUrlType(url) {
   return 'memo_기타링크';
 }
 
+/* ---- Topic auto-detection ---- */
+const TOPIC_RULES = [
+  {k:['부동산','아파트','오피스텔','힐스테이트','힐','빌라','상가','임대차','취등록','양도세','pir','전세가','매매가'], v:'부동산'},
+  {k:['송도'], v:'송도'},
+  {k:['판교','강남','분당','수원','용인','광교','위례'], v:'지역'},
+  {k:['주식','보로노이','삼성물산','삼성화재','현대엘베','특수개발','매수','매도','종목','포트폴리오'], v:'주식'},
+  {k:['법인','세무','세금','사업자','인건비','급여','조종료','세무사'], v:'법인/세무'},
+  {k:['제품','제조','원료','패키지','moq','수면r','수면','원가','생산','상페'], v:'제품'},
+  {k:['aeo','geo','seo','마케팅','광고','바이럴','전환율','ctr','캠페인','콘텐츠'], v:'마케팅'},
+  {k:['대출','금리','ltv','담보','신용','레버리지'], v:'대출/금융'},
+  {k:['정부지원','지원사업','보조금','정책자금'], v:'정부지원'},
+  {k:['전세','월세','임대','보증금','계약'], v:'임대차'},
+  {k:['투자','roi','수익률','배당'], v:'투자'},
+];
+
+function detectTopics(text, url) {
+  const s = ((text||'') + ' ' + (url||'')).toLowerCase();
+  const found = [];
+  for (const rule of TOPIC_RULES) {
+    if (rule.k.some(k => s.includes(k.toLowerCase())) && !found.includes(rule.v)) {
+      found.push(rule.v);
+    }
+  }
+  return found.slice(0, 4);
+}
+
 /* ---- Text-only memo classifier ---- */
 function classifyText(text) {
-  const t = text;
-  // 통화/미팅 감지
+  const t = text.toLowerCase();
   if (/회의|미팅|통화|상담|참석|액션|결론|안건|다음 주|다음주|일정/.test(t)) return 'call';
-  // 바이럴 감지
-  if (/조회수|좋아요|댓글수|팔로워|바이럴|훅|CTA|광고비|전환율/.test(t)) return 'viral';
-  // 숫자 계산/분석 → 생각정리
+  if (/조회수|좋아요|댓글수|팔로워|바이럴|훅|cta|광고비|전환율/.test(t)) return 'viral';
   if (/\d+억|\d+만원|\d+천만|수익률|roi|pir|대출|매출|비용|법인|투자|주식/.test(t)) return 'memo_생각정리';
-  // 짧고 단순 → 아이디어
   if (text.trim().split('\n').length <= 2 && text.length < 120) return 'memo_아이디어';
-  // 길고 구조적 → 생각정리
   if (text.trim().split('\n').length >= 4) return 'memo_생각정리';
   return 'memo_메모';
 }
@@ -1964,19 +1991,24 @@ function extractItemsFromContent(content) {
 
   for (const url of urls) {
     const type = guessUrlType(url);
-    const label = textWithoutUrls.split('\n')[0].trim() || url;
-    const title = label.length > 70 ? label.slice(0, 70) + '...' : label;
-    items.push({ type: guessUrlType(url), title: title || url, content: textWithoutUrls, url });
+    // 제목: URL 다음에 오는 텍스트가 있으면 그걸 제목으로, 없으면 URL 도메인
+    const contextText = textWithoutUrls.split('\n')[0].trim();
+    const domain = url.replace(/https?:\/\//,'').split('/')[0];
+    const title = contextText || domain;
+    const shortTitle = title.length > 70 ? title.slice(0, 70) + '...' : title;
+    const topics = detectTopics(content, url);
+    items.push({ type, title: shortTitle, content: textWithoutUrls, url, topics });
   }
 
+  // 텍스트 파트: URL의 단순 레이블(짧고 1~2줄)이면 별도 아이템 안 만듦
   if (textWithoutUrls) {
-    // Only add as separate text item if it's not just a label for a URL above
-    const isJustLabel = urls.length > 0 && textWithoutUrls.split('\n').length <= 2 && textWithoutUrls.length < 80;
-    if (!isJustLabel || urls.length === 0) {
+    const isShortLabel = urls.length > 0 && textWithoutUrls.split('\n').length <= 2 && textWithoutUrls.length < 80;
+    if (!isShortLabel) {
       const type = classifyText(textWithoutUrls);
       const firstLine = textWithoutUrls.split('\n')[0].trim();
       const title = firstLine.length > 70 ? firstLine.slice(0, 70) + '...' : firstLine;
-      items.push({ type, title, content: textWithoutUrls, url: '' });
+      const topics = detectTopics(textWithoutUrls, '');
+      items.push({ type, title, content: textWithoutUrls, url: '', topics });
     }
   }
 
@@ -2057,14 +2089,14 @@ function renderParsedPreview() {
   const count = parsedItems.length;
   document.getElementById('parsed-count').textContent = `${count}개 항목 감지됨`;
 
-  const TYPE_OPTIONS = Object.entries(TYPE_META)
-    .map(([v, m]) => `<option value="${v}">${m.label}</option>`).join('');
-
   const html = parsedItems.map((item, idx) => {
     const meta = TYPE_META[item.type] || TYPE_META['memo_메모'];
-    const preview = item.content
-      ? item.content.replace(/</g,'&lt;').slice(0, 200) + (item.content.length > 200 ? '...' : '')
-      : '';
+    const preview = (item.content || '').replace(/</g,'&lt;').replace(/\n/g,'<br>');
+    const previewShort = preview.length > 300 ? preview.slice(0,300) + '...' : preview;
+    const chips = (item.topics||[]).map((t,ti) =>
+      `<span class="topic-chip">${t}<span class="topic-chip-del" onclick="removeTopic(${idx},${ti})">×</span></span>`
+    ).join('');
+
     return `
     <div class="parsed-item-card" id="pcard-${idx}">
       <div class="parsed-item-top">
@@ -2073,13 +2105,19 @@ function renderParsedPreview() {
         </select>
         <button class="parsed-item-remove" onclick="removeParsedItem(${idx})" title="삭제">✕</button>
       </div>
-      <input class="parsed-title-input" value="${(item.title||'').replace(/"/g,'&quot;')}" placeholder="제목" oninput="updateParsedTitle(${idx},this.value)">
-      ${item.url ? `<div style="margin-bottom:6px"><span class="parsed-url-tag" title="${item.url}">🔗 ${item.url}</span></div>` : ''}
-      ${preview ? `<div class="parsed-content-preview">${preview}</div>` : ''}
+      <input class="parsed-title-input" value="${(item.title||'').replace(/"/g,'&quot;').replace(/'/g,"&#39;")}" placeholder="제목" oninput="updateParsedTitle(${idx},this.value)">
+      <div class="topic-input-wrap">
+        <span style="font-size:11px;color:var(--text-muted);white-space:nowrap">주제:</span>
+        ${chips}
+        <input class="topic-add-input" placeholder="+ 주제 추가" onkeydown="addTopicOnEnter(event,${idx},this)">
+      </div>
+      ${item.url ? `<div style="margin-bottom:6px;overflow:hidden"><span class="parsed-url-tag" title="${item.url}">🔗 ${item.url}</span></div>` : ''}
+      ${previewShort ? `<div class="parsed-content-preview">${previewShort}</div>` : ''}
     </div>`;
   }).join('');
 
-  document.getElementById('parsed-items-list').innerHTML = html || '<div style="color:var(--text-muted);font-size:13px">감지된 항목이 없습니다</div>';
+  document.getElementById('parsed-items-list').innerHTML = html ||
+    '<div style="color:var(--text-muted);font-size:13px;padding:8px">감지된 항목이 없습니다</div>';
 }
 
 function updateParsedType(idx, val) {
@@ -2093,6 +2131,20 @@ function removeParsedItem(idx) {
   renderParsedPreview();
   document.getElementById('parsed-count').textContent = `${parsedItems.length}개 항목 감지됨`;
   if (!parsedItems.length) document.getElementById('parsed-preview').style.display = 'none';
+}
+function removeTopic(itemIdx, topicIdx) {
+  parsedItems[itemIdx].topics.splice(topicIdx, 1);
+  renderParsedPreview();
+}
+function addTopicOnEnter(e, idx, input) {
+  if (e.key === 'Enter' || e.key === ',') {
+    e.preventDefault();
+    const val = input.value.trim().replace(/,/g,'');
+    if (val && !parsedItems[idx].topics.includes(val)) {
+      parsedItems[idx].topics.push(val);
+      renderParsedPreview();
+    }
+  }
 }
 
 /* ---- Save all parsed items ---- */
@@ -2109,15 +2161,17 @@ function saveAllParsedItems() {
   for (const item of parsedItems) {
     const title = (item.title || '(제목 없음)').trim();
 
+    const tags = item.topics || [];
+
     if (item.type === 'viral') {
       viralArr.push({
         id: genId('v'), title,
         channel: guessChannel(item.content, item.url),
-        type: '바이럴', category: '기타', author: '',
+        type: '바이럴', category: tags[0] || '기타', author: '',
         originalDate: now, collectedAt: now,
         views: 0, likes: 0, comments: 0,
         url: item.url || '',
-        aiSummary: '', tags: [],
+        aiSummary: '', tags,
         myMemo: item.content || '',
         isBest: false, isPublished: false, publishedAt: null
       });
@@ -2128,7 +2182,7 @@ function saveAllParsedItems() {
         id: genId('c'), title,
         type: '기타', date: now, duration: 0, attendees: [],
         fullContent: item.content || '',
-        aiSummary: '', actionItems: [], tags: [], myMemo: '',
+        aiSummary: '', actionItems: [], tags, myMemo: '',
         createdAt: now
       });
       counts.call++;
@@ -2139,7 +2193,7 @@ function saveAllParsedItems() {
         id: genId('m'), type: memoType, title,
         content: item.content || '',
         url: item.url || '',
-        myThought: '', tags: [], aiSummary: '',
+        myThought: '', tags, aiSummary: '',
         savedAt: now
       });
       counts.memo++;
