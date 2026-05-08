@@ -1,7 +1,7 @@
 """
 Threads 수집기 (Playwright)
-로그인된 Chrome 프로필 세션을 재사용합니다.
-첫 실행 전에 CHROME_PROFILE_PATH 경로의 Chrome에서 threads.net 로그인을 완료하세요.
+도메인: threads.com (2025년 변경)
+로그인된 Chrome 프로필 세션 재사용
 """
 import asyncio
 import os
@@ -13,7 +13,7 @@ from playwright.async_api import async_playwright
 
 async def collect_threads(max_items: int = None) -> list[dict]:
     max_items = max_items or int(os.getenv("MAX_ITEMS_PER_PLATFORM", "15"))
-    min_likes = int(os.getenv("MIN_LIKES", "500"))
+    min_likes = int(os.getenv("MIN_LIKES", "0"))  # Threads는 좋아요 수 미표시 가능
     profile_path = os.getenv("CHROME_PROFILE_PATH", "C:/Chrome_Profile_Archive")
 
     items = []
@@ -23,88 +23,58 @@ async def collect_threads(max_items: int = None) -> list[dict]:
             user_data_dir=profile_path,
             headless=True,
             args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            ),
         )
         page = await ctx.new_page()
 
         try:
-            await page.goto("https://www.threads.net/", wait_until="networkidle", timeout=30_000)
+            await page.goto("https://www.threads.com/", wait_until="load", timeout=30_000)
+            try:
+                await page.wait_for_selector('a[href*="/post/"]', timeout=10_000)
+            except Exception:
+                pass
             await page.wait_for_timeout(3000)
 
-            if "login" in page.url.lower() or await page.query_selector('input[type="password"]'):
+            if "login" in page.url.lower():
                 raise RuntimeError(
                     "Threads 로그인이 필요합니다.\n"
-                    f"Chrome을 열어 threads.net에 로그인한 뒤 다시 실행하세요.\n"
-                    f"프로필 경로: {profile_path}"
+                    "run_login_chrome.bat 실행 후 threads.com에 로그인하세요."
                 )
 
-            collected_urls: set[str] = set()
+            seen_urls: set[str] = set()
             scroll_round = 0
 
-            while len(items) < max_items and scroll_round < 12:
-                # 게시글 카드 (구조가 바뀌면 아래 셀렉터를 threads.net 소스에서 확인)
-                posts = await page.query_selector_all("div[role='article'], article")
+            while len(items) < max_items and scroll_round < 10:
+                # JS로 게시글 일괄 추출 (link-first 방식)
+                posts = await page.evaluate(_EXTRACT_POSTS_JS)
 
                 for post in posts:
+                    href = post.get("href", "")
+                    if not href or href in seen_urls:
+                        continue
+                    seen_urls.add(href)
+
+                    text = post.get("text", "").strip()
+                    if len(text) < 20:
+                        continue
+
+                    likes = int(post.get("likes", 0))
+                    if likes < min_likes:
+                        continue
+
+                    author = post.get("author", "")
+                    url = f"https://www.threads.com{href}" if href.startswith("/") else href
+
+                    items.append(_make_item(
+                        channel="스레드",
+                        title=text[:80] + ("..." if len(text) > 80 else ""),
+                        content=text,
+                        author=author,
+                        url=url,
+                        likes=likes,
+                    ))
+
                     if len(items) >= max_items:
                         break
-                    try:
-                        # 본문 텍스트
-                        text_el = await post.query_selector(
-                            "div[dir='auto'] span, div[class*='x1iorvi4'] span"
-                        )
-                        text = (await text_el.inner_text()).strip() if text_el else ""
-                        if len(text) < 20:
-                            continue
-
-                        # 퍼머링크
-                        link_el = await post.query_selector("a[href*='/t/']")
-                        url = ""
-                        if link_el:
-                            href = await link_el.get_attribute("href") or ""
-                            url = (
-                                f"https://www.threads.net{href}"
-                                if href.startswith("/")
-                                else href
-                            )
-                        if url in collected_urls:
-                            continue
-                        collected_urls.add(url)
-
-                        # 좋아요 수 (aria-label 방식)
-                        likes = 0
-                        like_btn = await post.query_selector(
-                            "button[aria-label*='like'], button[aria-label*='좋아요']"
-                        )
-                        if like_btn:
-                            label = await like_btn.get_attribute("aria-label") or ""
-                            nums = re.findall(r"[\d,]+", label)
-                            if nums:
-                                likes = int(nums[0].replace(",", ""))
-
-                        if likes < min_likes:
-                            continue
-
-                        # 작성자
-                        author_el = await post.query_selector("a[href*='/@'] span")
-                        author = (await author_el.inner_text()).strip() if author_el else ""
-
-                        items.append(
-                            _make_item(
-                                channel="스레드",
-                                title=text[:80] + ("..." if len(text) > 80 else ""),
-                                content=text,
-                                author=author,
-                                url=url,
-                                likes=likes,
-                            )
-                        )
-                    except Exception:
-                        continue
 
                 await page.evaluate("window.scrollBy(0, window.innerHeight * 2)")
                 await page.wait_for_timeout(2500)
@@ -114,6 +84,57 @@ async def collect_threads(max_items: int = None) -> list[dict]:
             await ctx.close()
 
     return items
+
+
+# 게시글 추출 JS — 텍스트 span 기반 (위로 탐색해 /post/ 링크 찾기)
+_EXTRACT_POSTS_JS = """() => {
+    const results = [];
+    const seen = new Set();
+
+    // span[dir=auto] 에서 시작해서 부모 중에 /post/ 링크가 있는 컨테이너 찾기
+    document.querySelectorAll('span[dir="auto"]').forEach(span => {
+        const text = (span.innerText || '').trim();
+        // 너무 짧거나, URL처럼 보이거나, 사용자명처럼 보이는 것 제외
+        if (text.length < 25 || text.startsWith('http') || text.startsWith('@')) return;
+
+        // 위로 올라가며 /post/ 링크 찾기
+        let container = span.parentElement;
+        let postLink = null;
+        for (let i = 0; i < 20; i++) {
+            if (!container || container.tagName === 'BODY') break;
+            const link = container.querySelector('a[href*="/post/"]');
+            if (link) { postLink = link; break; }
+            container = container.parentElement;
+        }
+        if (!postLink) return;
+
+        const href = postLink.getAttribute('href');
+        if (!href || seen.has(href)) return;
+        seen.add(href);
+
+        // 작성자: href 패턴 /@username/post/...
+        const m = href.match(/^\\/?([@]?[^/]+)\\/post\\//);
+        let author = '';
+        if (m) {
+            author = '@' + m[1].replace(/^@/, '');
+        }
+        // 또는 컨테이너 내 @계정명 링크
+        if (!author) {
+            const userLink = container.querySelector('a[href^="/@"]');
+            if (userLink) author = (userLink.innerText || '').trim();
+        }
+
+        // 좋아요 — innerText 패턴
+        let likes = 0;
+        const containerText = (container.innerText || '');
+        const likeMatch = containerText.match(/(\\d[\\d,]*)\\s*(?:like|좋아요)/i);
+        if (likeMatch) likes = parseInt(likeMatch[1].replace(/,/g, ''));
+
+        results.push({ href, text: text.slice(0, 500), author, likes });
+    });
+
+    return results;
+}"""
 
 
 def _make_item(channel, title, content, author, url, views=0, likes=0, comments=0) -> dict:
@@ -138,13 +159,11 @@ def _make_item(channel, title, content, author, url, views=0, likes=0, comments=
     }
 
 
-# 구매/판매 키워드가 있으면 판매글로 자동 분류
 _SALES_KEYWORDS = ["구매", "신청", "한정", "마감", "가격", "할인", "무료", "클릭", "링크"]
 
 
 def _guess_type(text: str) -> str:
-    text_lower = text.lower()
-    if any(k in text_lower for k in _SALES_KEYWORDS):
+    if any(k in text for k in _SALES_KEYWORDS):
         return "판매글"
     return "바이럴"
 
@@ -152,5 +171,8 @@ def _guess_type(text: str) -> str:
 if __name__ == "__main__":
     results = asyncio.run(collect_threads())
     print(f"Threads 수집: {len(results)}개")
-    for r in results[:3]:
-        print(f"  [{r['likes']}좋아요] {r['title'][:50]}")
+    for r in results[:5]:
+        try:
+            print(f"  [{r['likes']}좋아요] {r['title'][:60]}")
+        except UnicodeEncodeError:
+            print(f"  [{r['likes']}likes] {r['title'][:60].encode('ascii','replace').decode()}")

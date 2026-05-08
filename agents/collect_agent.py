@@ -1,5 +1,5 @@
 """
-스마트 아카이브 수집 에이전트 — 메인 실행 파일
+스마트 아카이브 수집 에이전트 - 메인 실행 파일
 매일 Task Scheduler에서 자동 실행됩니다.
 
 수집 순서: Threads → X → YouTube → Instagram
@@ -25,7 +25,8 @@ LOG_FILE = Path(__file__).parent / "collect_log.txt"
 def log(msg: str):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}"
-    print(line)
+    # Windows cp949 콘솔 호환: 인코딩 불가 문자는 ? 로 대체
+    print(line.encode(sys.stdout.encoding or "utf-8", errors="replace").decode(sys.stdout.encoding or "utf-8", errors="replace"))
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(line + "\n")
 
@@ -50,7 +51,7 @@ async def run():
         log(f"{name} 수집 중...")
         try:
             items = await coro
-            log(f"{name} 완료 — {len(items)}개 수집")
+            log(f"{name} 완료 - {len(items)}개 수집")
             all_items.extend(items)
             summary.append(f"  {_channel_emoji(name)} {name}: +{len(items)}개")
         except Exception as exc:
@@ -96,7 +97,7 @@ async def run():
     else:
         log("Telegram 알림 건너뜀 (토큰 미설정)")
 
-    log(f"수집 에이전트 종료 — 성공: {len(all_items)}개 | 오류: {len(errors)}개")
+    log(f"수집 에이전트 종료 - 성공: {len(all_items)}개 | 오류: {len(errors)}개")
     log("=" * 60)
 
     return all_items
@@ -144,7 +145,7 @@ def _send_telegram_summary(items, summary_lines, errors, json_path):
     error_text = "\n".join(f"  ⚠️ {e}" for e in errors) if errors else "  없음"
 
     text = (
-        f"🔍 <b>수집 완료 — {today}</b>\n\n"
+        f"🔍 <b>수집 완료 - {today}</b>\n\n"
         + "\n".join(summary_lines)
         + f"\n\n<b>오늘의 Best 후보 Top 3</b>\n{top_lines}"
         + (f"\n\n<b>오류</b>\n{error_text}" if errors else "")
