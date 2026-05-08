@@ -197,6 +197,18 @@ select.form-input{appearance:none;}
 .color-opt.selected,.color-opt:hover{border-color:var(--text-primary);}
 /* IMPORT MERGE BTNS */
 .merge-row{display:flex;gap:8px;margin-top:8px;}
+/* QUICK SAVE */
+.quick-save-box{background:var(--bg-card);border:2px solid var(--accent);border-radius:14px;padding:20px;margin-bottom:24px;}
+.quick-save-header{display:flex;align-items:center;gap:10px;margin-bottom:6px;}
+.quick-save-title{font-size:16px;font-weight:700;color:var(--text-primary);}
+.quick-save-desc{font-size:12px;color:var(--text-muted);margin-bottom:12px;}
+.quick-paste-area{width:100%;min-height:140px;padding:14px;background:var(--bg-primary);border:1px solid var(--border);border-radius:10px;color:var(--text-primary);font-size:14px;resize:vertical;line-height:1.7;transition:border .2s;}
+.quick-paste-area:focus{border-color:var(--accent);}
+.quick-save-row{display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap;}
+.quick-type-select{padding:9px 12px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:13px;flex:1;min-width:120px;}
+.quick-detect-badge{font-size:12px;color:var(--success);background:var(--bg-primary);border:1px solid var(--success);border-radius:20px;padding:3px 10px;display:none;}
+.form-divider{display:flex;align-items:center;gap:12px;margin-bottom:20px;color:var(--text-muted);font-size:12px;}
+.form-divider::before,.form-divider::after{content:'';flex:1;height:1px;background:var(--border);}
 </style>
 </head>
 <body>
@@ -254,6 +266,34 @@ select.form-input{appearance:none;}
     <!-- ADD FORM -->
     <div class="form-area" id="form-area" style="display:none;">
       <div class="form-title">➕ 새로 추가</div>
+
+      <!-- QUICK SAVE -->
+      <div class="quick-save-box">
+        <div class="quick-save-header">
+          <span style="font-size:20px">📥</span>
+          <span class="quick-save-title">빠른 저장</span>
+          <span class="quick-detect-badge" id="quick-detect-badge"></span>
+        </div>
+        <div class="quick-save-desc">카카오 메시지, SNS 글, 링크, 메모 등 — 그대로 붙여넣고 저장하세요</div>
+        <textarea class="quick-paste-area" id="quick-paste" placeholder="여기에 내용을 붙여넣으세요...&#10;&#10;예시)&#10;• 카카오톡에서 나에게 보낸 메시지&#10;• X/스레드 바이럴 글 원문&#10;• 유튜브 링크&#10;• 기억해두고 싶은 아이디어" oninput="onQuickPasteInput()"></textarea>
+        <div class="quick-save-row">
+          <select class="quick-type-select" id="quick-type">
+            <option value="auto">🔍 자동 감지</option>
+            <option value="viral">📊 바이럴 글</option>
+            <option value="memo_유튜브링크">🎬 유튜브 링크</option>
+            <option value="memo_인스타링크">📸 인스타 링크</option>
+            <option value="memo_아이디어">💡 아이디어</option>
+            <option value="memo_생각정리">🧠 생각 정리</option>
+            <option value="memo_기타링크">🔗 기타 링크</option>
+            <option value="memo_메모">📝 메모</option>
+            <option value="call">📞 통화/미팅 기록</option>
+          </select>
+          <button class="btn btn-primary" style="padding:9px 24px" onclick="quickSave()">💾 저장</button>
+          <button class="btn btn-secondary" onclick="quickClear()">지우기</button>
+        </div>
+      </div>
+
+      <div class="form-divider">상세 입력</div>
       <div class="form-type-select">
         <button class="form-type-btn active" onclick="setFormType('viral')">📊 바이럴 글</button>
         <button class="form-type-btn" onclick="setFormType('memo')">💬 메모</button>
@@ -1851,6 +1891,138 @@ function toast(msg) {
   el.classList.add('show');
   clearTimeout(toast._t);
   toast._t = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+/* ============================================================
+   QUICK SAVE
+   ============================================================ */
+function detectContentType(text) {
+  const t = text.trim().toLowerCase();
+  const firstLine = text.trim().split('\n')[0];
+
+  if (/youtube\.com|youtu\.be/.test(t)) return {type:'memo_유튜브링크', label:'🎬 유튜브 링크 감지'};
+  if (/instagram\.com|instagr\.am/.test(t)) return {type:'memo_인스타링크', label:'📸 인스타 링크 감지'};
+  if (/x\.com|twitter\.com|threads\.net/.test(t)) return {type:'viral', label:'📊 SNS 글 감지'};
+  if (/https?:\/\//.test(t) && text.trim().split('\n').length <= 3) return {type:'memo_기타링크', label:'🔗 링크 감지'};
+  if (/통화|미팅|회의|상담|참석|액션|결론|안건/.test(t)) return {type:'call', label:'📞 통화/미팅 감지'};
+  if (/조회|좋아요|댓글|팔로워|바이럴|훅|cta/.test(t)) return {type:'viral', label:'📊 바이럴 글 감지'};
+  if (text.trim().split('\n').length <= 5 && text.length < 300) return {type:'memo_아이디어', label:'💡 아이디어 감지'};
+  return {type:'memo_메모', label:'📝 메모 감지'};
+}
+
+function onQuickPasteInput() {
+  const text = document.getElementById('quick-paste').value;
+  const sel = document.getElementById('quick-type').value;
+  const badge = document.getElementById('quick-detect-badge');
+
+  if (!text.trim()) { badge.style.display='none'; return; }
+
+  if (sel === 'auto') {
+    const detected = detectContentType(text);
+    badge.textContent = detected.label;
+    badge.style.display = 'inline-block';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function quickSave() {
+  const text = document.getElementById('quick-paste').value.trim();
+  if (!text) { toast('내용을 입력하세요'); return; }
+
+  let sel = document.getElementById('quick-type').value;
+  if (sel === 'auto') sel = detectContentType(text).type;
+
+  const lines = text.split('\n').filter(l => l.trim());
+  const firstLine = lines[0] || text.slice(0, 40);
+  const titleGuess = firstLine.length > 60 ? firstLine.slice(0, 60) + '...' : firstLine;
+
+  // URL 추출
+  const urlMatch = text.match(/https?:\/\/[^\s]+/);
+  const url = urlMatch ? urlMatch[0] : '';
+
+  const now = today();
+
+  if (sel === 'viral') {
+    const item = {
+      id: genId('v'),
+      title: titleGuess,
+      channel: guessChannel(text, url),
+      type: '바이럴',
+      category: '기타',
+      author: '',
+      originalDate: now,
+      collectedAt: now,
+      views: 0, likes: 0, comments: 0,
+      url,
+      aiSummary: '',
+      tags: [],
+      myMemo: text,
+      isBest: false,
+      isPublished: false,
+      publishedAt: null
+    };
+    const arr = getData(KEYS.viral);
+    arr.push(item);
+    saveData(KEYS.viral, arr);
+    toast('✅ 바이럴 글로 저장됨 — 📊 탭에서 확인');
+
+  } else if (sel === 'call') {
+    const item = {
+      id: genId('c'),
+      title: titleGuess,
+      type: '기타',
+      date: now,
+      duration: 0,
+      attendees: [],
+      fullContent: text,
+      aiSummary: '',
+      actionItems: [],
+      tags: [],
+      myMemo: '',
+      createdAt: now
+    };
+    const arr = getData(KEYS.calls);
+    arr.push(item);
+    saveData(KEYS.calls, arr);
+    toast('✅ 통화 기록으로 저장됨 — 📞 탭에서 확인');
+
+  } else {
+    // memo_* 유형
+    const memoType = sel.replace('memo_', '') || '메모';
+    const item = {
+      id: genId('m'),
+      type: memoType,
+      title: titleGuess,
+      content: text,
+      url,
+      myThought: '',
+      tags: [],
+      aiSummary: '',
+      savedAt: now
+    };
+    const arr = getData(KEYS.memo);
+    arr.push(item);
+    saveData(KEYS.memo, arr);
+    toast(`✅ ${memoType}으로 저장됨 — 💬 탭에서 확인`);
+  }
+
+  document.getElementById('quick-paste').value = '';
+  document.getElementById('quick-detect-badge').style.display = 'none';
+  document.getElementById('quick-type').value = 'auto';
+}
+
+function quickClear() {
+  document.getElementById('quick-paste').value = '';
+  document.getElementById('quick-detect-badge').style.display = 'none';
+}
+
+function guessChannel(text, url) {
+  if (/x\.com|twitter\.com/.test(url||text)) return 'X';
+  if (/threads\.net/.test(url||text)) return '스레드';
+  if (/instagram\.com/.test(url||text)) return '인스타그램';
+  if (/youtube\.com|youtu\.be/.test(url||text)) return '유튜브';
+  return 'X';
 }
 
 /* ============================================================
