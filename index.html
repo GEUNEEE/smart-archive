@@ -387,8 +387,9 @@ let currentTab = 'viral';
 let currentFilter = {type:'전체', channel:'전체', category:'전체', tags:[], search:''};
 let selectedId = null;
 let formType = 'viral';
-let addImageFiles = []; // pending upload items [{file, id, preview}]
-let idb = null; // IndexedDB instance
+let addImageFiles = [];
+let idb = null;
+let groupedViewItems = [];
 
 /* ============================================================
    INIT
@@ -721,19 +722,32 @@ function renderList() {
       </div>`;
     }).join('');
   } else if (currentTab === 'memo') {
-    container.innerHTML = items.map(item => `
-      <div class="card ${selectedId===item.id?'active':''}" onclick="selectItem('${item.id}')">
+    const groupBtn = items.length >= 2
+      ? `<button class="btn btn-secondary" style="width:100%;font-size:12px;margin-bottom:10px" onclick="showGroupedView()">📋 ${items.length}개 항목 모아 보기 · AI 분석</button>`
+      : '';
+    container.innerHTML = groupBtn + items.map(item => {
+      const isYt = item.type === '유튜브링크' && item.url;
+      const ytId = isYt ? extractYouTubeId(item.url) : null;
+      const thumb = ytId ? `<img src="https://img.youtube.com/vi/${ytId}/mqdefault.jpg" style="width:100%;border-radius:6px;margin-bottom:6px;aspect-ratio:16/9;object-fit:cover">` : '';
+      return `<div class="card ${selectedId===item.id?'active':''}" onclick="selectItem('${item.id}')">
+        ${thumb}
         <div class="card-badges">
           <span class="badge" style="background:#6366F120;color:#818CF8">${item.type||'메모'}</span>
+          ${(item.tags||[]).slice(0,2).map(t=>`<span class="badge" style="background:var(--bg-secondary);color:var(--text-muted)">${t}</span>`).join('')}
         </div>
         <div class="card-title">${item.title}</div>
         <div class="card-meta"><span>${item.savedAt||''}</span></div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   } else if (currentTab === 'calls') {
-    container.innerHTML = items.map(item => `
+    const groupBtn = items.length >= 2
+      ? `<button class="btn btn-secondary" style="width:100%;font-size:12px;margin-bottom:10px" onclick="showGroupedView()">📋 ${items.length}개 항목 모아 보기 · AI 분석</button>`
+      : '';
+    container.innerHTML = groupBtn + items.map(item => `
       <div class="card ${selectedId===item.id?'active':''}" onclick="selectItem('${item.id}')">
         <div class="card-badges">
           <span class="badge" style="background:#10B98120;color:#10B981">${item.type||'미팅'}</span>
+          ${(item.tags||[]).slice(0,2).map(t=>`<span class="badge" style="background:var(--bg-secondary);color:var(--text-muted)">${t}</span>`).join('')}
         </div>
         <div class="card-title">${item.title}</div>
         <div class="card-meta">
@@ -841,34 +855,53 @@ function renderDetail(id) {
     const items = getData(KEYS.memo);
     const item = items.find(i=>i.id===id);
     if (!item) return;
+    const isYt = item.type === '유튜브링크' && item.url;
+    const ytId = isYt ? extractYouTubeId(item.url) : null;
+    const ytThumb = ytId
+      ? `<div style="margin-bottom:16px">
+           <a href="${item.url}" target="_blank">
+             <img src="https://img.youtube.com/vi/${ytId}/maxresdefault.jpg"
+               onerror="this.src='https://img.youtube.com/vi/${ytId}/mqdefault.jpg'"
+               style="width:100%;border-radius:10px;cursor:pointer">
+           </a>
+           <div style="text-align:center;margin-top:8px">
+             <a href="${item.url}" target="_blank" class="btn btn-secondary" style="font-size:12px;padding:6px 14px;display:inline-block">▶ YouTube에서 보기</a>
+           </div>
+         </div>`
+      : '';
     document.getElementById('detail-content').innerHTML = `
       <button class="detail-close-btn" onclick="closeDetail()">← 목록으로</button>
       <div class="detail-title">${item.title}</div>
       <div class="detail-badges">
         <span class="badge" style="background:#6366F120;color:#818CF8">${item.type||'메모'}</span>
+        ${(item.tags||[]).map(t=>`<span class="detail-tag">${t}</span>`).join('')}
       </div>
-      <div class="detail-section">
+      ${ytThumb}
+      ${item.content ? `<div class="detail-section">
         <div class="detail-section-title">내용</div>
-        <div class="detail-text">${(item.content||'').replace(/\n/g,'<br>')}</div>
-      </div>
-      ${item.url?`<div class="detail-section"><div class="detail-section-title">링크</div><a href="${item.url}" target="_blank">${item.url}</a></div>`:''}
+        <div class="detail-text">${item.content.replace(/</g,'&lt;').replace(/\n/g,'<br>')}</div>
+      </div>` : ''}
+      ${item.url && !isYt ? `<div class="detail-section"><div class="detail-section-title">링크</div><a href="${item.url}" target="_blank">${item.url}</a></div>` : ''}
       <div class="detail-section">
         <div class="detail-section-title">AI 요약</div>
-        <div class="detail-text">${item.aiSummary||'요약 없음'}</div>
+        <div class="detail-text" id="detail-ai-summary">${item.aiSummary ? item.aiSummary.replace(/\n/g,'<br>') : '<span style="color:var(--text-muted)">요약 없음 — 아래 버튼으로 프롬프트 복사 후 Claude에서 생성</span>'}</div>
+        ${item.aiSummary ? `<button class="btn btn-secondary" style="margin-top:6px;font-size:12px" onclick="editAiSummary('memo','${id}')">✏️ 수정</button>` : ''}
       </div>
       <div class="detail-section">
         <div class="detail-section-title">나의 생각</div>
         <textarea class="memo-input" id="detail-memo" placeholder="나의 생각...">${item.myThought||''}</textarea>
         <button class="btn btn-secondary" style="margin-top:8px" onclick="saveMemo('memo','${id}')">저장</button>
       </div>
-      <div class="detail-section">
-        <div class="detail-section-title">태그</div>
-        <div class="detail-tags">${(item.tags||[]).map(t=>`<span class="detail-tag">${t}</span>`).join('')||'태그 없음'}</div>
-      </div>
       <div class="detail-section"><div class="detail-section-title">저장일</div><div class="detail-text">${item.savedAt||'-'}</div></div>
       <div class="action-bar">
-        <button class="btn btn-primary" onclick="copyMemoPrompt('${id}')">✍️ 이 내용으로 글 작성</button>
+        <button class="btn btn-primary" onclick="copyMemoAnalysisPrompt('${id}')">🤖 AI 분석 프롬프트 복사</button>
+        <button class="btn btn-secondary" onclick="copyMemoPrompt('${id}')">✍️ 글 작성</button>
         <button class="btn btn-danger" onclick="deleteItem('memo','${id}')">🗑 삭제</button>
+      </div>
+      <div id="ai-summary-edit-area" style="display:none;margin-top:12px">
+        <div class="detail-section-title">AI 요약 입력</div>
+        <textarea class="memo-input" id="ai-summary-input" placeholder="Claude에서 생성한 요약을 붙여넣으세요...">${item.aiSummary||''}</textarea>
+        <button class="btn btn-primary" style="margin-top:8px" onclick="saveAiSummary('memo','${id}')">저장</button>
       </div>`;
   } else if (currentTab === 'calls') {
     const items = getData(KEYS.calls);
@@ -1909,6 +1942,121 @@ function toast(msg) {
   el.classList.add('show');
   clearTimeout(toast._t);
   toast._t = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+/* ============================================================
+   GROUP VIEW + YOUTUBE HELPERS
+   ============================================================ */
+function extractYouTubeId(url) {
+  if (!url) return null;
+  const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([a-zA-Z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+
+function showGroupedView() {
+  groupedViewItems = getFilteredItems();
+  if (!groupedViewItems.length) return;
+
+  selectedId = null;
+  document.getElementById('detail-panel').classList.add('visible');
+  document.getElementById('no-detail').style.display = 'none';
+
+  const tagLabel = currentFilter.tags.length
+    ? currentFilter.tags.join(' · ')
+    : (currentFilter.type !== '전체' ? currentFilter.type : '전체 항목');
+
+  const itemsHtml = groupedViewItems.map((item, idx) => {
+    const content = currentTab === 'memo'
+      ? (item.content || item.myThought || '')
+      : (item.fullContent || item.aiSummary || '');
+    const summary = item.aiSummary ? `<div style="margin-top:8px;padding:8px;background:var(--bg-primary);border-radius:6px;font-size:12px;color:var(--text-secondary)"><b>AI 요약:</b> ${item.aiSummary.replace(/\n/g,'<br>')}</div>` : '';
+    const tags = (item.tags||[]).map(t=>`<span class="detail-tag">${t}</span>`).join('');
+    const isYt = item.type === '유튜브링크' && item.url;
+    const ytId = isYt ? extractYouTubeId(item.url) : null;
+    const thumb = ytId
+      ? `<a href="${item.url}" target="_blank"><img src="https://img.youtube.com/vi/${ytId}/mqdefault.jpg" style="width:100%;max-width:320px;border-radius:8px;margin-bottom:8px"></a>`
+      : '';
+    const urlLink = item.url && !isYt ? `<div style="margin-top:6px;font-size:12px"><a href="${item.url}" target="_blank">🔗 ${item.url}</a></div>` : '';
+    const ytLink = isYt ? `<div style="margin-top:6px;font-size:12px"><a href="${item.url}" target="_blank">▶ YouTube에서 보기</a></div>` : '';
+
+    return `<div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+        <span style="font-size:13px;font-weight:700;color:var(--text-primary)">${idx+1}. ${item.title||'(제목 없음)'}</span>
+        <span style="font-size:11px;color:var(--text-muted)">${item.savedAt||item.date||''}</span>
+      </div>
+      ${tags ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">${tags}</div>` : ''}
+      ${thumb}
+      ${content ? `<div style="font-size:13px;color:var(--text-secondary);line-height:1.8;white-space:pre-wrap;word-break:break-word">${content.replace(/</g,'&lt;')}</div>` : ''}
+      ${urlLink}${ytLink}
+      ${summary}
+    </div>`;
+  }).join('');
+
+  document.getElementById('detail-content').innerHTML = `
+    <button class="detail-close-btn" onclick="closeDetail()">← 목록으로</button>
+    <div class="detail-title">🗂 ${tagLabel} — ${groupedViewItems.length}개 항목</div>
+    ${itemsHtml}
+    <div class="action-bar" style="margin-top:8px">
+      <button class="btn btn-primary" onclick="copyGroupAnalysisPrompt()">🤖 전체 AI 분석/요약 프롬프트 복사</button>
+    </div>`;
+}
+
+function copyGroupAnalysisPrompt() {
+  const items = groupedViewItems;
+  if (!items.length) return;
+  const tagLabel = currentFilter.tags.join(', ') || '전체';
+  const tab = currentTab === 'memo' ? '메모' : '통화기록';
+
+  const itemsText = items.map((item, idx) => {
+    const content = currentTab === 'memo'
+      ? [item.content, item.myThought].filter(Boolean).join('\n')
+      : [item.fullContent, item.aiSummary].filter(Boolean).join('\n');
+    const tags = (item.tags||[]).join(', ');
+    return `=== ${idx+1}. ${item.title} ${tags?'['+tags+']':''} ===\n${content}`;
+  }).join('\n\n');
+
+  const prompt = `다음 ${tab} 항목들을 분석하고 정리해줘.
+
+주제: ${tagLabel}
+항목 수: ${items.length}개
+
+${itemsText}
+
+분석 요청:
+1. 전체 핵심 요약 (5줄 이내)
+2. 주요 포인트 / 인사이트
+3. 연결되는 패턴이나 관계
+4. 액션 아이템 또는 다음 단계
+5. 추가로 확인/검토해야 할 것`;
+
+  copyToClipboard(prompt);
+}
+
+function copyMemoAnalysisPrompt(id) {
+  const items = getData(KEYS.memo);
+  const item = items.find(i=>i.id===id);
+  if (!item) return;
+  const isYt = item.type === '유튜브링크';
+  const prompt = isYt
+    ? `다음 유튜브 영상 내용을 분석해줘.\n\n제목: ${item.title}\nURL: ${item.url||''}\n메모: ${item.content||''}\n\n분석 항목:\n1. 핵심 요약 5줄\n2. 주요 인사이트\n3. 실용적 적용 방법\n4. 관련 키워드 5개`
+    : `다음 메모를 분석하고 정리해줘.\n\n제목: ${item.title}\n유형: ${item.type}\n내용:\n${item.content||''}\n\n분석 항목:\n1. 핵심 요약\n2. 주요 포인트\n3. 액션 아이템`;
+  copyToClipboard(prompt);
+}
+
+function editAiSummary(tab, id) {
+  const area = document.getElementById('ai-summary-edit-area');
+  if (area) area.style.display = area.style.display === 'none' ? 'block' : 'none';
+}
+
+function saveAiSummary(tab, id) {
+  const val = document.getElementById('ai-summary-input').value.trim();
+  if (tab === 'memo') {
+    const arr = getData(KEYS.memo);
+    const item = arr.find(i=>i.id===id);
+    if (item) { item.aiSummary = val; saveData(KEYS.memo, arr); }
+  }
+  renderDetail(id);
+  toast('AI 요약 저장됨');
 }
 
 /* ============================================================
