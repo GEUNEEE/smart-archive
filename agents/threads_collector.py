@@ -7,13 +7,17 @@ import asyncio
 import os
 import re
 from datetime import datetime
+from pathlib import Path
 
+from dotenv import load_dotenv
 from playwright.async_api import async_playwright
+
+load_dotenv(Path(__file__).parent / ".env")
 
 
 async def collect_threads(max_items: int = None) -> list[dict]:
     max_items = max_items or int(os.getenv("MAX_ITEMS_PER_PLATFORM", "15"))
-    min_likes = int(os.getenv("MIN_LIKES", "0"))  # Threads는 좋아요 수 미표시 가능
+    min_likes = 0  # Threads는 좋아요 수 미표시 — 필터 없음
     profile_path = os.getenv("CHROME_PROFILE_PATH", "C:/Chrome_Profile_Archive")
 
     items = []
@@ -41,44 +45,65 @@ async def collect_threads(max_items: int = None) -> list[dict]:
                 )
 
             seen_urls: set[str] = set()
-            scroll_round = 0
 
-            while len(items) < max_items and scroll_round < 10:
-                # JS로 게시글 일괄 추출 (link-first 방식)
-                posts = await page.evaluate(_EXTRACT_POSTS_JS)
+            # 홈피드 + 탐색(추천) 탭 두 곳 수집
+            collect_pages = [
+                ("홈피드", "https://www.threads.com/"),
+                ("탐색",   "https://www.threads.com/explore/"),
+            ]
 
-                for post in posts:
-                    href = post.get("href", "")
-                    if not href or href in seen_urls:
-                        continue
-                    seen_urls.add(href)
+            for page_name, page_url in collect_pages:
+                if len(items) >= max_items:
+                    break
 
-                    text = post.get("text", "").strip()
-                    if len(text) < 20:
-                        continue
+                if page.url.rstrip("/") != page_url.rstrip("/"):
+                    await page.goto(page_url, wait_until="load", timeout=30_000)
+                    try:
+                        await page.wait_for_selector('a[href*="/post/"]', timeout=10_000)
+                    except Exception:
+                        pass
+                    await page.wait_for_timeout(3000)
 
-                    likes = int(post.get("likes", 0))
-                    if likes < min_likes:
-                        continue
+                scroll_round = 0
 
-                    author = post.get("author", "")
-                    url = f"https://www.threads.com{href}" if href.startswith("/") else href
+                while len(items) < max_items and scroll_round < 20:
+                    posts = await page.evaluate(_EXTRACT_POSTS_JS)
 
-                    items.append(_make_item(
-                        channel="스레드",
-                        title=text[:80] + ("..." if len(text) > 80 else ""),
-                        content=text,
-                        author=author,
-                        url=url,
-                        likes=likes,
-                    ))
+                    for post in posts:
+                        href = post.get("href", "")
+                        if not href or href in seen_urls:
+                            continue
+                        seen_urls.add(href)
 
-                    if len(items) >= max_items:
-                        break
+                        text = post.get("text", "").strip()
+                        if len(text) < 20:
+                            continue
 
-                await page.evaluate("window.scrollBy(0, window.innerHeight * 2)")
-                await page.wait_for_timeout(2500)
-                scroll_round += 1
+                        likes = int(post.get("likes", 0))
+                        if likes < min_likes:
+                            continue
+
+                        author = post.get("author", "")
+                        url = f"https://www.threads.com{href}" if href.startswith("/") else href
+
+                        items.append(_make_item(
+                            channel="스레드",
+                            title=text[:80] + ("..." if len(text) > 80 else ""),
+                            content=text,
+                            author=author,
+                            url=url,
+                            likes=likes,
+                        ))
+
+                        if len(items) >= max_items:
+                            break
+
+                    await page.evaluate("window.scrollBy(0, window.innerHeight * 2)")
+                    await page.wait_for_timeout(2000)
+                    scroll_round += 1
+
+                    if scroll_round % 10 == 0:
+                        await page.wait_for_timeout(2000)
 
         finally:
             await ctx.close()

@@ -6,9 +6,13 @@ import asyncio
 import os
 import re
 from datetime import datetime
+from pathlib import Path
 
+from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 from threads_collector import _make_item
+
+load_dotenv(Path(__file__).parent / ".env")
 
 
 async def collect_x(max_items: int = None) -> list[dict]:
@@ -27,8 +31,8 @@ async def collect_x(max_items: int = None) -> list[dict]:
         page = await ctx.new_page()
 
         try:
+            # 로그인 확인
             await page.goto("https://x.com/home", wait_until="load", timeout=30_000)
-            # 트윗이 렌더링될 때까지 대기 (최대 15초)
             try:
                 await page.wait_for_selector('article[data-testid="tweet"]', timeout=15_000)
             except Exception:
@@ -42,42 +46,65 @@ async def collect_x(max_items: int = None) -> list[dict]:
                 )
 
             seen_urls: set[str] = set()
-            scroll_round = 0
 
-            while len(items) < max_items and scroll_round < 12:
-                posts = await page.evaluate(_EXTRACT_POSTS_JS)
+            # 수집할 페이지 목록: 홈피드 + 탐색(트렌딩)
+            collect_pages = [
+                ("홈피드",   "https://x.com/home"),
+                ("탐색",     "https://x.com/explore/tabs/trending"),
+            ]
 
-                for post in posts:
-                    url = post.get("url", "")
-                    if not url or url in seen_urls:
-                        continue
-                    seen_urls.add(url)
+            for page_name, page_url in collect_pages:
+                if len(items) >= max_items:
+                    break
 
-                    text = post.get("text", "").strip()
-                    if len(text) < 15:
-                        continue
+                if page.url != page_url:
+                    await page.goto(page_url, wait_until="load", timeout=30_000)
+                    try:
+                        await page.wait_for_selector('article[data-testid="tweet"]', timeout=10_000)
+                    except Exception:
+                        pass
+                    await page.wait_for_timeout(2000)
 
-                    likes = int(post.get("likes", 0))
-                    if likes < min_likes:
-                        continue
+                scroll_round = 0
+                per_page_limit = max_items // len(collect_pages) + 10
 
-                    items.append(_make_item(
-                        channel="X",
-                        title=text[:80] + ("..." if len(text) > 80 else ""),
-                        content=text,
-                        author=post.get("author", ""),
-                        url=url,
-                        views=int(post.get("views", 0)),
-                        likes=likes,
-                        comments=int(post.get("comments", 0)),
-                    ))
+                while len(items) < max_items and scroll_round < 20:
+                    posts = await page.evaluate(_EXTRACT_POSTS_JS)
 
-                    if len(items) >= max_items:
-                        break
+                    for post in posts:
+                        url = post.get("url", "")
+                        if not url or url in seen_urls:
+                            continue
+                        seen_urls.add(url)
 
-                await page.evaluate("window.scrollBy(0, window.innerHeight * 2)")
-                await page.wait_for_timeout(2500)
-                scroll_round += 1
+                        text = post.get("text", "").strip()
+                        if len(text) < 15:
+                            continue
+
+                        likes = int(post.get("likes", 0))
+                        if likes < min_likes:
+                            continue
+
+                        items.append(_make_item(
+                            channel="X",
+                            title=text[:80] + ("..." if len(text) > 80 else ""),
+                            content=text,
+                            author=post.get("author", ""),
+                            url=url,
+                            views=int(post.get("views", 0)),
+                            likes=likes,
+                            comments=int(post.get("comments", 0)),
+                        ))
+
+                        if len(items) >= max_items:
+                            break
+
+                    await page.evaluate("window.scrollBy(0, window.innerHeight * 2)")
+                    await page.wait_for_timeout(2000)
+                    scroll_round += 1
+
+                    if scroll_round % 10 == 0:
+                        await page.wait_for_timeout(2000)
 
         finally:
             await ctx.close()
