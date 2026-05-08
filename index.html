@@ -927,6 +927,7 @@ function renderDetail(id) {
           : `<button class="btn btn-primary" onclick="copyMemoAnalysisPrompt('${id}')">${isYt ? '🎬 YouTube 분석 프롬프트 복사' : '🤖 AI 분석 프롬프트 복사'}</button>`
         }
         <button class="btn btn-secondary" onclick="copyMemoPrompt('${id}')">✍️ 글 작성</button>
+        <button class="btn btn-secondary" onclick="moveItem('memo','${id}','calls')">→ 통화기록으로 이동</button>
         <button class="btn btn-danger" onclick="deleteItem('memo','${id}')">🗑 삭제</button>
       </div>`;
   } else if (currentTab === 'calls') {
@@ -972,6 +973,7 @@ function renderDetail(id) {
       <div class="action-bar">
         <button class="btn btn-primary" onclick="copyCallPrompt('${id}')">✍️ 요약 글 작성</button>
         <button class="btn btn-secondary" onclick="copyCallAnalysis('${id}')">🤖 AI 분석 프롬프트 복사</button>
+        <button class="btn btn-secondary" onclick="moveItem('calls','${id}','memo')">→ 메모함으로 이동</button>
         <button class="btn btn-danger" onclick="deleteItem('calls','${id}')">🗑 삭제</button>
       </div>`;
   } else if (currentTab === 'images') {
@@ -1089,6 +1091,72 @@ function toggleBest(id) {
     renderList();
     toast(item.isBest ? '⭐ BEST 설정됨' : 'BEST 해제됨');
   }
+}
+
+/* ============================================================
+   MOVE BETWEEN TABS
+   ============================================================ */
+function moveItem(fromTab, id, toTab) {
+  const tabLabel = toTab === 'calls' ? '통화기록' : '메모함';
+  showModal('이동 확인', `이 항목을 ${tabLabel}으로 이동하시겠습니까?`, [
+    {label:'취소', cls:'btn-secondary', action:'closeModal()'},
+    {label:'이동', cls:'btn-primary', action:`confirmMove('${fromTab}','${id}','${toTab}')`}
+  ]);
+}
+
+function confirmMove(fromTab, id, toTab) {
+  closeModal();
+  const fromKey = KEYS[fromTab];
+  const toKey = KEYS[toTab];
+  const fromArr = getData(fromKey);
+  const idx = fromArr.findIndex(i => i.id === id);
+  if (idx === -1) return;
+  const src = fromArr[idx];
+
+  let newItem;
+  if (fromTab === 'memo' && toTab === 'calls') {
+    newItem = {
+      id: genId('c'),
+      title: src.title,
+      type: '기타',
+      date: src.savedAt || today(),
+      duration: 0,
+      attendees: [],
+      fullContent: src.content || '',
+      aiSummary: src.aiSummary || '',
+      actionItems: [],
+      tags: src.tags || [],
+      myMemo: src.myThought || '',
+      createdAt: today()
+    };
+  } else if (fromTab === 'calls' && toTab === 'memo') {
+    newItem = {
+      id: genId('m'),
+      type: '메모',
+      title: src.title,
+      content: src.fullContent || '',
+      url: '',
+      myThought: src.myMemo || '',
+      tags: src.tags || [],
+      aiSummary: src.aiSummary || '',
+      savedAt: src.date || today()
+    };
+  } else {
+    return;
+  }
+
+  fromArr.splice(idx, 1);
+  saveData(fromKey, fromArr);
+
+  const toArr = getData(toKey);
+  toArr.unshift(newItem);
+  saveData(toKey, toArr);
+
+  switchTab(toTab);
+  selectedId = newItem.id;
+  renderList();
+  renderDetail(newItem.id);
+  toast(`✅ ${toTab === 'calls' ? '통화기록' : '메모함'}으로 이동됨`);
 }
 
 /* ============================================================
