@@ -106,9 +106,10 @@ async def collect_x(max_items: int = None) -> list[dict]:
                             if likes < min_likes:
                                 continue
 
+                        _fl = text.split('\n')[0].strip()
                         items.append(_make_item(
                             channel="X",
-                            title=text[:80] + ("..." if len(text) > 80 else ""),
+                            title=_fl if len(_fl) <= 100 else _fl[:97] + '...',
                             content=text,
                             author=post.get("author", ""),
                             url=url,
@@ -175,7 +176,7 @@ _EXTRACT_POSTS_JS = """() => {
                 if (m) views = parseInt(m[0]);
             }
 
-            results.push({ url, text: text.slice(0, 500), author, likes, comments, views });
+            results.push({ url, text: text.slice(0, 2000), author, likes, comments, views });
         } catch(e) {}
     });
 

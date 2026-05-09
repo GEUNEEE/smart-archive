@@ -16,6 +16,16 @@ from playwright.async_api import async_playwright
 load_dotenv(Path(__file__).parent / ".env")
 
 
+async def _fetch_threads_post_detail(page, url: str) -> dict:
+    """Threads 게시글 상세 페이지에서 조회수와 전체 텍스트 추출"""
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=20_000)
+        await page.wait_for_timeout(1500)
+        return await page.evaluate(_FETCH_DETAIL_JS) or {"views": 0, "text": ""}
+    except Exception:
+        return {"views": 0, "text": ""}
+
+
 async def collect_threads(max_items: int = None) -> list[dict]:
     max_items = max_items or int(os.getenv("MAX_ITEMS_PER_PLATFORM", "15"))
     min_likes = 0  # Threads는 좋아요 수 미표시 — 필터 없음
@@ -100,9 +110,10 @@ async def collect_threads(max_items: int = None) -> list[dict]:
                         author = post.get("author", "")
                         url = f"https://www.threads.com{href}" if href.startswith("/") else href
 
+                        _fl = text.split('\n')[0].strip()
                         items.append(_make_item(
                             channel="스레드",
-                            title=text[:80] + ("..." if len(text) > 80 else ""),
+                            title=_fl if len(_fl) <= 100 else _fl[:97] + '...',
                             content=text,
                             author=author,
                             url=url,
@@ -120,24 +131,34 @@ async def collect_threads(max_items: int = None) -> list[dict]:
                     if scroll_round % 10 == 0:
                         await page.wait_for_timeout(2000)
 
+            # 상세 페이지에서 조회수·전체 텍스트 보강
+            for item in items:
+                if item.get("url"):
+                    detail = await _fetch_threads_post_detail(page, item["url"])
+                    if detail.get("views", 0) > 0:
+                        item["views"] = detail["views"]
+                    if detail.get("text") and len(detail["text"]) > len(item.get("content", "")):
+                        item["content"] = detail["text"]
+                        _fl = detail["text"].split("\n")[0].strip()
+                        item["title"] = _fl if len(_fl) <= 100 else _fl[:97] + "..."
+
         finally:
             await ctx.close()
 
     return items
 
 
-# 게시글 추출 JS — 텍스트 span 기반 (위로 탐색해 /post/ 링크 찾기)
+# 피드 게시글 추출 JS — 다중 span 연결로 전체 본문 수집
 _EXTRACT_POSTS_JS = """() => {
     const results = [];
     const seen = new Set();
+    const UI_SKIP = /^(\\d+[smhd분시일]?|팔로우|Follow|더 보기|See more|좋아요|Like|답글|Reply|공유|Share|Repost|리포스트)$/i;
 
-    // span[dir=auto] 에서 시작해서 부모 중에 /post/ 링크가 있는 컨테이너 찾기
     document.querySelectorAll('span[dir="auto"]').forEach(span => {
-        const text = (span.innerText || '').trim();
-        // 너무 짧거나, URL처럼 보이거나, 사용자명처럼 보이는 것 제외
-        if (text.length < 25 || text.startsWith('http') || text.startsWith('@')) return;
+        const firstText = (span.innerText || '').trim();
+        if (firstText.length < 25 || firstText.startsWith('http') || firstText.startsWith('@')) return;
 
-        // 위로 올라가며 /post/ 링크 찾기
+        // 위로 올라가며 /post/ 링크 포함 컨테이너 찾기
         let container = span.parentElement;
         let postLink = null;
         for (let i = 0; i < 20; i++) {
@@ -152,13 +173,24 @@ _EXTRACT_POSTS_JS = """() => {
         if (!href || seen.has(href)) return;
         seen.add(href);
 
+        // 컨테이너 내 모든 텍스트 span 수집 → 전체 본문 조합
+        const textParts = [];
+        const seenTexts = new Set();
+        container.querySelectorAll('span[dir="auto"]').forEach(s => {
+            const t = (s.innerText || '').trim();
+            if (t.length < 3 || seenTexts.has(t)) return;
+            if (t.startsWith('@') || t.startsWith('http')) return;
+            if (UI_SKIP.test(t)) return;
+            seenTexts.add(t);
+            textParts.push(t);
+        });
+        const fullText = textParts.join('\\n').trim();
+        if (fullText.length < 25) return;
+
         // 작성자: href 패턴 /@username/post/...
         const m = href.match(/^\\/?([@]?[^/]+)\\/post\\//);
         let author = '';
-        if (m) {
-            author = '@' + m[1].replace(/^@/, '');
-        }
-        // 또는 컨테이너 내 @계정명 링크
+        if (m) author = '@' + m[1].replace(/^@/, '');
         if (!author) {
             const userLink = container.querySelector('a[href^="/@"]');
             if (userLink) author = (userLink.innerText || '').trim();
@@ -167,7 +199,6 @@ _EXTRACT_POSTS_JS = """() => {
         // 좋아요 / 댓글 — 다중 전략
         let likes = 0, comments = 0;
 
-        // 전략 1: aria-label 에 숫자가 있는 버튼/역할 요소
         container.querySelectorAll('[role="button"], button, [aria-label]').forEach(el => {
             const aria = (el.getAttribute('aria-label') || '').toLowerCase();
             const m = aria.match(/(\\d[\\d,]+)/);
@@ -178,7 +209,6 @@ _EXTRACT_POSTS_JS = """() => {
             }
         });
 
-        // 전략 2: innerText 패턴 (likes / 좋아요 / replies / 댓글)
         if (!likes || !comments) {
             const txt = container.innerText || '';
             if (!likes) {
@@ -191,10 +221,8 @@ _EXTRACT_POSTS_JS = """() => {
             }
         }
 
-        // 전략 3: 숫자만 있는 작은 span — 하트 아이콘 옆
         if (!likes) {
-            const svgs = container.querySelectorAll('svg');
-            svgs.forEach(svg => {
+            container.querySelectorAll('svg').forEach(svg => {
                 const ariaLabel = (svg.getAttribute('aria-label') || svg.closest('[aria-label]')?.getAttribute('aria-label') || '').toLowerCase();
                 if (/like|heart|좋아요/.test(ariaLabel)) {
                     let el = svg.parentElement;
@@ -210,10 +238,47 @@ _EXTRACT_POSTS_JS = """() => {
             });
         }
 
-        results.push({ href, text: text.slice(0, 500), author, likes, comments });
+        results.push({ href, text: fullText.slice(0, 2000), author, likes, comments });
     });
 
     return results;
+}"""
+
+
+# 상세 페이지 조회수·전체 텍스트 추출 JS
+_FETCH_DETAIL_JS = """() => {
+    let views = 0;
+    for (const el of document.querySelectorAll('span, div')) {
+        const t = (el.innerText || '').trim();
+        const m = t.match(/^([\\d,.]+[KkMm]?)\\s*(?:views?|조회수?)/i);
+        if (m) {
+            const raw = m[1].replace(/,/g, '');
+            if (/[KkMm]$/.test(raw)) {
+                views = Math.round(parseFloat(raw) * (/[Kk]/.test(raw) ? 1000 : 1000000));
+            } else { views = parseInt(raw) || 0; }
+            if (views > 0) break;
+        }
+    }
+    if (!views) {
+        for (const el of document.querySelectorAll('[aria-label]')) {
+            const lbl = (el.getAttribute('aria-label') || '').toLowerCase();
+            if (/view|조회/.test(lbl)) {
+                const m = lbl.match(/([\\d,]+)/);
+                if (m) { views = parseInt(m[1].replace(/,/g, '')); break; }
+            }
+        }
+    }
+    const textParts = [];
+    const seenTexts = new Set();
+    const UI_SKIP = /^(\\d+[smhd분시일]?|팔로우|Follow|더 보기|See more|좋아요|Like|답글|Reply|공유|Share|Repost|리포스트)$/i;
+    document.querySelectorAll('span[dir="auto"]').forEach(s => {
+        const t = (s.innerText || '').trim();
+        if (t.length < 3 || seenTexts.has(t) || t.startsWith('@') || t.startsWith('http')) return;
+        if (UI_SKIP.test(t)) return;
+        seenTexts.add(t);
+        textParts.push(t);
+    });
+    return { views, text: textParts.join('\\n').trim().slice(0, 2000) };
 }"""
 
 
