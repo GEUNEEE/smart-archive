@@ -880,8 +880,8 @@ function renderDetail(id) {
         <div class="stat-box"><div class="stat-num">${fmtNum(item.comments)}</div><div class="stat-label">댓글</div></div>
       </div>
       <div class="detail-section">
-        <div class="detail-section-title">AI 요약</div>
-        <div class="detail-text">${item.aiSummary||'요약이 없습니다. "AI 분석 프롬프트 복사" 버튼을 사용하세요.'}</div>
+        <div class="detail-section-title">본문</div>
+        <div class="detail-text" style="white-space:pre-wrap;line-height:1.7">${(item.content||item.title||'').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
       </div>
       <div class="detail-section">
         <div class="detail-section-title">태그</div>
