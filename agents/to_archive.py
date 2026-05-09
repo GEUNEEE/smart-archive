@@ -43,6 +43,7 @@ def generate_archive_json(items: list[dict], output_path: str = None) -> str:
             "likes": int(item.get("likes", 0)),
             "comments": int(item.get("comments", 0)),
             "url": item.get("url", ""),
+            "content": item.get("content", ""),
             "aiSummary": item.get("aiSummary", ""),
             "tags": item.get("tags", []),
             "myMemo": item.get("myMemo", ""),

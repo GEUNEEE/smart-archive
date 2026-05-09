@@ -131,16 +131,12 @@ async def collect_threads(max_items: int = None) -> list[dict]:
                     if scroll_round % 10 == 0:
                         await page.wait_for_timeout(2000)
 
-            # 상세 페이지에서 조회수·전체 텍스트 보강
+            # 상세 페이지에서 조회수 추출
             for item in items:
                 if item.get("url"):
                     detail = await _fetch_threads_post_detail(page, item["url"])
                     if detail.get("views", 0) > 0:
                         item["views"] = detail["views"]
-                    if detail.get("text") and len(detail["text"]) > len(item.get("content", "")):
-                        item["content"] = detail["text"]
-                        _fl = detail["text"].split("\n")[0].strip()
-                        item["title"] = _fl if len(_fl) <= 100 else _fl[:97] + "..."
 
         finally:
             await ctx.close()
@@ -152,7 +148,7 @@ async def collect_threads(max_items: int = None) -> list[dict]:
 _EXTRACT_POSTS_JS = """() => {
     const results = [];
     const seen = new Set();
-    const UI_SKIP = /^(\\d+[smhd분시일]?|팔로우|Follow|더 보기|See more|좋아요|Like|답글|Reply|공유|Share|Repost|리포스트)$/i;
+    const UI_SKIP = /^(\\d+[smhd분시일]?|팔로우|Follow|더 보기|See more|좋아요|Like|답글|Reply|공유|Share|Repost|리포스트|[\\d,.]+[KkMmBb]?\\s*(?:views?|조회수?))$/i;
 
     document.querySelectorAll('span[dir="auto"]').forEach(span => {
         const firstText = (span.innerText || '').trim();
@@ -181,6 +177,8 @@ _EXTRACT_POSTS_JS = """() => {
             if (t.length < 3 || seenTexts.has(t)) return;
             if (t.startsWith('@') || t.startsWith('http')) return;
             if (UI_SKIP.test(t)) return;
+            // 계정명·도메인 제외 (ASCII 전용, 공백 없음, 25자 미만)
+            if (/^[a-zA-Z0-9._]+$/.test(t) && !t.includes(' ') && t.length < 25) return;
             seenTexts.add(t);
             textParts.push(t);
         });
@@ -270,7 +268,7 @@ _FETCH_DETAIL_JS = """() => {
     }
     const textParts = [];
     const seenTexts = new Set();
-    const UI_SKIP = /^(\\d+[smhd분시일]?|팔로우|Follow|더 보기|See more|좋아요|Like|답글|Reply|공유|Share|Repost|리포스트)$/i;
+    const UI_SKIP = /^(\\d+[smhd분시일]?|팔로우|Follow|더 보기|See more|좋아요|Like|답글|Reply|공유|Share|Repost|리포스트|[\\d,.]+[KkMmBb]?\\s*(?:views?|조회수?))$/i;
     document.querySelectorAll('span[dir="auto"]').forEach(s => {
         const t = (s.innerText || '').trim();
         if (t.length < 3 || seenTexts.has(t) || t.startsWith('@') || t.startsWith('http')) return;
