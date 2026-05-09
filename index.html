@@ -84,9 +84,12 @@ a:hover{color:var(--accent-hover);}
 .tag-chip{padding:3px 10px;border-radius:20px;font-size:12px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-secondary);cursor:pointer;transition:all .15s;}
 .tag-chip:hover,.tag-chip.active{background:var(--accent);border-color:var(--accent);color:#fff;}
 .list-items{flex:1;overflow-y:auto;padding:8px;}
-.card{padding:12px;border-radius:8px;background:var(--bg-card);border:1px solid var(--border);margin-bottom:8px;cursor:pointer;transition:all .15s;}
+.card{position:relative;padding:12px;padding-right:30px;border-radius:8px;background:var(--bg-card);border:1px solid var(--border);margin-bottom:8px;cursor:pointer;transition:all .15s;}
 .card:hover{border-color:var(--accent);}
 .card.active{border-color:var(--accent);background:var(--bg-secondary);}
+.card-del{position:absolute;top:7px;right:7px;width:20px;height:20px;border-radius:50%;background:transparent;border:none;color:var(--text-muted);font-size:14px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;opacity:0;transition:opacity .15s,background .15s;}
+.card:hover .card-del{opacity:1;}
+.card-del:hover{background:var(--danger);color:#fff;}
 .card-badges{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;}
 .badge{padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;}
 .card-title{font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px;line-height:1.4;}
@@ -444,6 +447,36 @@ function showApp() {
   setTimeout(autoImportFromServer, 1200);
 }
 
+/* ── 번역 ── */
+function needsTranslation(text) {
+  if (!text || text.length < 15) return false;
+  const sample = text.slice(0, 300);
+  const nonAscii = (sample.match(/[^\x20-\x7E\n\r\t]/g) || []).length;
+  return nonAscii / sample.length < 0.15;
+}
+
+async function translateText(text) {
+  const cached = sessionStorage.getItem('tr_' + text.slice(0,40));
+  if (cached) return cached;
+  try {
+    const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ko&dt=t&q=' + encodeURIComponent(text);
+    const res = await fetch(url);
+    const data = await res.json();
+    const result = data[0].map(c => c[0]).filter(Boolean).join('');
+    sessionStorage.setItem('tr_' + text.slice(0,40), result);
+    return result;
+  } catch(e) { return null; }
+}
+
+function toggleOriginal(id) {
+  const el  = document.getElementById('orig-' + id);
+  const btn = document.getElementById('orig-btn-' + id);
+  if (!el) return;
+  const hidden = el.style.display === 'none';
+  el.style.display = hidden ? 'block' : 'none';
+  btn.textContent  = hidden ? '원문 숨기기' : '원문 보기';
+}
+
 async function autoImportFromServer() {
   try {
     const res = await fetch('./imports/latest.json?t=' + Date.now());
@@ -746,6 +779,7 @@ function renderList() {
       const ch = s.channels.find(c=>c.name===item.channel)||{color:'#888'};
       const cat = s.categories.find(c=>c.name===item.category)||{color:'#888'};
       return `<div class="card ${selectedId===item.id?'active':''}" onclick="selectItem('${item.id}')">
+        <button class="card-del" onclick="event.stopPropagation();quickDelete('viral','${item.id}')">×</button>
         <div class="card-badges">
           <span class="badge" style="background:${ch.color}20;color:${ch.color}">${item.channel||'?'}</span>
           <span class="badge" style="background:#6366F120;color:#818CF8">${item.type||'바이럴'}</span>
@@ -780,6 +814,7 @@ function renderList() {
            </div>`
         : '';
       return `<div class="card ${selectedId===item.id?'active':''}" onclick="selectItem('${item.id}')">
+        <button class="card-del" onclick="event.stopPropagation();quickDelete('memo','${item.id}')">×</button>
         ${thumb}
         <div class="card-badges">
           <span class="badge" style="background:#6366F120;color:#818CF8">${item.type||'메모'}</span>
@@ -796,6 +831,7 @@ function renderList() {
       : '';
     container.innerHTML = groupBtn + items.map(item => `
       <div class="card ${selectedId===item.id?'active':''}" onclick="selectItem('${item.id}')">
+        <button class="card-del" onclick="event.stopPropagation();quickDelete('calls','${item.id}')">×</button>
         <div class="card-badges">
           <span class="badge" style="background:#10B98120;color:#10B981">${item.type||'미팅'}</span>
           ${(item.tags||[]).slice(0,2).map(t=>`<span class="badge" style="background:var(--bg-secondary);color:var(--text-muted)">${t}</span>`).join('')}
@@ -810,6 +846,7 @@ function renderList() {
   } else if (currentTab === 'images') {
     container.innerHTML = items.map(item => `
       <div class="card ${selectedId===item.id?'active':''}" onclick="selectItem('${item.id}')">
+        <button class="card-del" onclick="event.stopPropagation();quickDelete('images','${item.id}')">×</button>
         <img class="img-thumb" id="thumb-${item.id}" src="" alt="">
         <div class="card-badges">
           <span class="badge" style="background:#F59E0B20;color:#F59E0B">${item.category||'기타'}</span>
@@ -865,6 +902,8 @@ function renderDetail(id) {
     if (!item) return;
     const ch = s.channels.find(c=>c.name===item.channel)||{color:'#888'};
     const cat = s.categories.find(c=>c.name===item.category)||{color:'#888'};
+    const isThreads = item.channel === '스레드';
+    const bodyText = (item.content || item.title || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     document.getElementById('detail-content').innerHTML = `
       <button class="detail-close-btn" onclick="closeDetail()">← 목록으로</button>
       <div class="detail-title">${item.title}</div>
@@ -875,13 +914,15 @@ function renderDetail(id) {
         ${item.isBest?'<span class="best-badge">⭐ BEST</span>':''}
       </div>
       <div class="detail-stats">
-        <div class="stat-box"><div class="stat-num">${fmtNum(item.views)}</div><div class="stat-label">조회수</div></div>
-        <div class="stat-box"><div class="stat-num">${fmtNum(item.likes)}</div><div class="stat-label">좋아요</div></div>
-        <div class="stat-box"><div class="stat-num">${fmtNum(item.comments)}</div><div class="stat-label">댓글</div></div>
+        <div class="stat-box"><div class="stat-num">${isThreads?'비공개':fmtNum(item.views)}</div><div class="stat-label">조회수</div></div>
+        <div class="stat-box"><div class="stat-num">${isThreads&&!item.likes?'비공개':fmtNum(item.likes)}</div><div class="stat-label">좋아요</div></div>
+        <div class="stat-box"><div class="stat-num">${isThreads&&!item.comments?'비공개':fmtNum(item.comments)}</div><div class="stat-label">댓글</div></div>
       </div>
       <div class="detail-section">
-        <div class="detail-section-title">본문</div>
-        <div class="detail-text" style="white-space:pre-wrap;line-height:1.7">${(item.content||item.title||'').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+        <div class="detail-section-title" style="display:flex;align-items:center;gap:8px">본문 <span id="trans-label-${id}" style="font-size:11px;color:var(--accent);font-weight:400"></span></div>
+        <div id="trans-text-${id}" class="detail-text" style="white-space:pre-wrap;line-height:1.7">${bodyText}</div>
+        <div id="orig-${id}" style="display:none;margin-top:10px;padding:10px;background:var(--bg-primary);border-radius:6px;font-size:12px;color:var(--text-muted);white-space:pre-wrap;line-height:1.6">${bodyText}</div>
+        <button id="orig-btn-${id}" style="display:none;font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer;margin-top:6px;padding:0" onclick="toggleOriginal('${id}')">원문 보기</button>
       </div>
       <div class="detail-section">
         <div class="detail-section-title">태그</div>
@@ -908,6 +949,21 @@ function renderDetail(id) {
         <button class="btn btn-warning" onclick="toggleBest('${id}')">${item.isBest?'★ BEST 해제':'☆ BEST 설정'}</button>
         <button class="btn btn-danger" onclick="deleteItem('viral','${id}')">🗑 삭제</button>
       </div>`;
+    // 영문 콘텐츠 자동 번역
+    if (needsTranslation(item.content)) {
+      document.getElementById('trans-label-' + id).textContent = '번역 중...';
+      translateText(item.content).then(translated => {
+        const lbl = document.getElementById('trans-label-' + id);
+        const box = document.getElementById('trans-text-' + id);
+        const orig = document.getElementById('orig-' + id);
+        const btn  = document.getElementById('orig-btn-' + id);
+        if (!lbl || !translated) { if (lbl) lbl.textContent = ''; return; }
+        box.textContent = translated;
+        lbl.textContent = '🌐 한국어 번역';
+        orig.style.display = 'none';
+        btn.style.display = 'inline-block';
+      });
+    }
   } else if (currentTab === 'memo') {
     const items = getData(KEYS.memo);
     const item = items.find(i=>i.id===id);
@@ -1198,6 +1254,20 @@ function confirmMove(fromTab, id, toTab) {
 /* ============================================================
    DELETE
    ============================================================ */
+async function quickDelete(tab, id) {
+  if (tab === 'viral')  saveData(KEYS.viral,   getData(KEYS.viral).filter(i=>i.id!==id));
+  else if (tab === 'memo')   saveData(KEYS.memo,    getData(KEYS.memo).filter(i=>i.id!==id));
+  else if (tab === 'calls')  saveData(KEYS.calls,   getData(KEYS.calls).filter(i=>i.id!==id));
+  else if (tab === 'images') { saveData(KEYS.imgMeta, getData(KEYS.imgMeta).filter(i=>i.id!==id)); await idbDelete(id); }
+  if (selectedId === id) {
+    selectedId = null;
+    document.getElementById('detail-panel').classList.remove('visible');
+    document.getElementById('no-detail').style.display = 'flex';
+  }
+  renderList(); updateStats();
+  toast('삭제됨');
+}
+
 function deleteItem(tab, id) {
   showModal('삭제 확인', '정말 삭제하시겠습니까?', [
     {label:'취소', cls:'btn-secondary', action:'closeModal()'},

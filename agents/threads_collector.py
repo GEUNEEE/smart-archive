@@ -94,9 +94,8 @@ async def collect_threads(max_items: int = None) -> list[dict]:
                         if len(text) < 20:
                             continue
 
-                        likes = int(post.get("likes", 0))
-                        if likes < min_likes:
-                            continue
+                        likes    = int(post.get("likes", 0))
+                        comments = int(post.get("comments", 0))
 
                         author = post.get("author", "")
                         url = f"https://www.threads.com{href}" if href.startswith("/") else href
@@ -108,6 +107,7 @@ async def collect_threads(max_items: int = None) -> list[dict]:
                             author=author,
                             url=url,
                             likes=likes,
+                            comments=comments,
                         ))
 
                         if len(items) >= max_items:
@@ -164,13 +164,53 @@ _EXTRACT_POSTS_JS = """() => {
             if (userLink) author = (userLink.innerText || '').trim();
         }
 
-        // 좋아요 — innerText 패턴
-        let likes = 0;
-        const containerText = (container.innerText || '');
-        const likeMatch = containerText.match(/(\\d[\\d,]*)\\s*(?:like|좋아요)/i);
-        if (likeMatch) likes = parseInt(likeMatch[1].replace(/,/g, ''));
+        // 좋아요 / 댓글 — 다중 전략
+        let likes = 0, comments = 0;
 
-        results.push({ href, text: text.slice(0, 500), author, likes });
+        // 전략 1: aria-label 에 숫자가 있는 버튼/역할 요소
+        container.querySelectorAll('[role="button"], button, [aria-label]').forEach(el => {
+            const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+            const m = aria.match(/(\\d[\\d,]+)/);
+            const n = m ? parseInt(m[1].replace(/,/g,'')) : 0;
+            if (n > 0) {
+                if (/like|좋아요|heart/i.test(aria)) likes = Math.max(likes, n);
+                if (/repl|comment|댓글|reply/i.test(aria)) comments = Math.max(comments, n);
+            }
+        });
+
+        // 전략 2: innerText 패턴 (likes / 좋아요 / replies / 댓글)
+        if (!likes || !comments) {
+            const txt = container.innerText || '';
+            if (!likes) {
+                const m = txt.match(/(\\d[\\d,]*)\\s*(?:like|likes|좋아요)/i);
+                if (m) likes = parseInt(m[1].replace(/,/g,''));
+            }
+            if (!comments) {
+                const m = txt.match(/(\\d[\\d,]*)\\s*(?:repl|replies|comment|댓글)/i);
+                if (m) comments = parseInt(m[1].replace(/,/g,''));
+            }
+        }
+
+        // 전략 3: 숫자만 있는 작은 span — 하트 아이콘 옆
+        if (!likes) {
+            const svgs = container.querySelectorAll('svg');
+            svgs.forEach(svg => {
+                const ariaLabel = (svg.getAttribute('aria-label') || svg.closest('[aria-label]')?.getAttribute('aria-label') || '').toLowerCase();
+                if (/like|heart|좋아요/.test(ariaLabel)) {
+                    let el = svg.parentElement;
+                    for (let i = 0; i < 5; i++) {
+                        if (!el) break;
+                        const numMatch = (el.innerText || '').match(/^(\\d[\\d,]*)$/);
+                        if (numMatch) { likes = parseInt(numMatch[1].replace(/,/g,'')); break; }
+                        const sib = el.nextElementSibling;
+                        if (sib) { const nm = (sib.innerText || '').match(/^(\\d[\\d,]*)$/); if (nm) { likes = parseInt(nm[1].replace(/,/g,'')); break; } }
+                        el = el.parentElement;
+                    }
+                }
+            });
+        }
+
+        results.push({ href, text: text.slice(0, 500), author, likes, comments });
     });
 
     return results;
