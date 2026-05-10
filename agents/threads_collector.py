@@ -307,36 +307,40 @@ _EXTRACT_DETAIL_TEXT_JS = """() => {
         }
     }
 
-    const collect = (root) => {
-        const parts = [], seen = new Set();
-        root.querySelectorAll('span[dir="auto"]').forEach(s => {
-            if (s.parentElement && s.parentElement.closest('span[dir="auto"]')) return;
-            let t = (s.innerText || '').trim();
-            t = t.replace(/\\s*(더 보기|See more)\\s*$/i, '').trim();
-            if (t.length < 3 || seen.has(t)) return;
-            if (t.startsWith('@') || t.startsWith('http')) return;
-            if (UI_SKIP.test(t)) return;
-            if (/^[a-zA-Z0-9._]+$/.test(t) && !t.includes(' ') && t.length < 25) return;
-            seen.add(t); parts.push(t);
-        });
-        return parts.join('\\n');
+    // span의 innerText에서 답글 구분자 이후를 잘라냄
+    // "Related threads" 또는 "\nTranslate\n" 가 메인 포스트와 답글을 구분
+    const trimReplies = (t) => {
+        const relIdx = t.search(/\\nRelated threads(\\n|$)/i);
+        if (relIdx > 0) t = t.slice(0, relIdx);
+        // Translate 가 단독 줄로 등장하면 답글 시작 신호
+        const trIdx = t.search(/\\nTranslate\\n/i);
+        if (trIdx > 0) t = t.slice(0, trIdx);
+        return t.trim();
     };
 
-    // 2단계: 컨테이너에서 텍스트 수집
-    if (mainContainer) return collect(mainContainer);
+    // 루트에서 첫 번째 실질 span의 innerText 반환 (답글 경계 후 잘라냄)
+    const firstText = (root) => {
+        for (const s of root.querySelectorAll('span[dir="auto"]')) {
+            if (s.parentElement && s.parentElement.closest('span[dir="auto"]')) continue;
+            let t = (s.innerText || '').trim();
+            t = t.replace(/\\s*(더 보기|See more)\\s*$/i, '').trim();
+            if (t.length < 20) continue;
+            if (t.startsWith('@') || t.startsWith('http')) continue;
+            if (UI_SKIP.test(t)) continue;
+            if (/^[a-zA-Z0-9._]+$/.test(t) && !t.includes(' ') && t.length < 25) continue;
+            return trimReplies(t);
+        }
+        return '';
+    };
 
-    // 3단계 fallback: 최상위 span 중 첫 번째 실질 본문
-    for (const span of document.querySelectorAll('span[dir="auto"]')) {
-        if (span.parentElement && span.parentElement.closest('span[dir="auto"]')) continue;
-        let t = (span.innerText || '').trim();
-        t = t.replace(/\\s*(더 보기|See more)\\s*$/i, '').trim();
-        if (t.length < 20) continue;
-        if (t.startsWith('@') || t.startsWith('http')) continue;
-        if (UI_SKIP.test(t)) continue;
-        if (/^[a-zA-Z0-9._]+$/.test(t) && !t.includes(' ') && t.length < 25) continue;
-        return t;
+    // 2단계: 컨테이너에서 첫 번째 실질 span 텍스트 추출
+    if (mainContainer) {
+        const txt = firstText(mainContainer);
+        if (txt) return txt;
     }
-    return '';
+
+    // 3단계 fallback: 전체 페이지에서 첫 번째 실질 본문
+    return firstText(document);
 }"""
 
 
