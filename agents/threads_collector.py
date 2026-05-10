@@ -153,7 +153,7 @@ async def collect_threads(max_items: int = None) -> list[dict]:
 _EXTRACT_POSTS_JS = """() => {
     const results = [];
     const seen = new Set();
-    const UI_SKIP = /^(\\d+[smhd분시일]?|팔로우|Follow|더 보기|See more|좋아요|Like|답글|Reply|공유|Share|Repost|리포스트|[\\d,.]+[KkMmBb]?\\s*(?:views?|조회수?))$/i;
+    const UI_SKIP = /^(\\d+[smhd분시일]?|팔로우|Follow|더 보기|See more|좋아요|Like|답글|Reply|공유|Share|Repost|리포스트|[\\d,.]+[KkMmBb]?\\s*(?:views?|조회수?)|Translate|번역)$/i;
 
     document.querySelectorAll('span[dir="auto"]').forEach(span => {
         const firstText = (span.innerText || '').trim();
@@ -281,27 +281,59 @@ _FETCH_VIEWS_JS = """() => {
 
 
 # 상세 페이지 전용 텍스트 추출 JS
-# 피드용 _EXTRACT_POSTS_JS는 /post/ 링크 컨테이너를 찾아야 해서 상세 페이지에서 실패함.
-# 상세 페이지에는 자기 참조 링크가 없어 container 탐색 20단계 안에 /post/ 를 못 찾고 빈 배열 반환.
-# → 최상위 span[dir="auto"]의 innerText를 직접 가져오면 "더 보기" 없는 전체 텍스트를 얻을 수 있음.
+# 전략: window.location.pathname과 일치하는 /post/ 링크(타임스탬프 <a> 등)를 찾아
+# 그 상위 컨테이너에서 텍스트를 수집 → 메인 포스트만 정확히 추출.
+# 링크를 못 찾으면 최상위 span[dir="auto"].innerText fallback.
 _EXTRACT_DETAIL_TEXT_JS = """() => {
-    const UI_SKIP = /^(\\d+[smhd분시일]?|팔로우|Follow|더 보기|See more|좋아요|Like|답글|Reply|공유|Share|Repost|리포스트|[\\d,.]+[KkMmBb]?\\s*(?:views?|조회수?))$/i;
+    const UI_SKIP = /^(\\d+[smhd분시일]?|팔로우|Follow|더 보기|See more|좋아요|Like|답글|Reply|공유|Share|Repost|리포스트|[\\d,.]+[KkMmBb]?\\s*(?:views?|조회수?)|Translate|번역)$/i;
+    const currentPath = window.location.pathname.split('?')[0];
 
+    // 1단계: 현재 URL과 일치하는 /post/ 링크로 메인 포스트 컨테이너 탐색
+    let mainContainer = null;
+    for (const link of document.querySelectorAll('a[href*="/post/"]')) {
+        const href = (link.getAttribute('href') || '').split('?')[0];
+        if (!href) continue;
+        if (currentPath === href || currentPath.endsWith(href)) {
+            let c = link.parentElement;
+            for (let i = 0; i < 15; i++) {
+                if (!c || c.tagName === 'BODY') break;
+                if (c.querySelectorAll('span[dir="auto"]').length >= 2) {
+                    mainContainer = c;
+                    break;
+                }
+                c = c.parentElement;
+            }
+            if (mainContainer) break;
+        }
+    }
+
+    const collect = (root) => {
+        const parts = [], seen = new Set();
+        root.querySelectorAll('span[dir="auto"]').forEach(s => {
+            if (s.parentElement && s.parentElement.closest('span[dir="auto"]')) return;
+            let t = (s.innerText || '').trim();
+            t = t.replace(/\\s*(더 보기|See more)\\s*$/i, '').trim();
+            if (t.length < 3 || seen.has(t)) return;
+            if (t.startsWith('@') || t.startsWith('http')) return;
+            if (UI_SKIP.test(t)) return;
+            if (/^[a-zA-Z0-9._]+$/.test(t) && !t.includes(' ') && t.length < 25) return;
+            seen.add(t); parts.push(t);
+        });
+        return parts.join('\\n');
+    };
+
+    // 2단계: 컨테이너에서 텍스트 수집
+    if (mainContainer) return collect(mainContainer);
+
+    // 3단계 fallback: 최상위 span 중 첫 번째 실질 본문
     for (const span of document.querySelectorAll('span[dir="auto"]')) {
-        // 다른 span[dir="auto"] 안에 중첩된 경우 제외 — 최상위 span만 처리
         if (span.parentElement && span.parentElement.closest('span[dir="auto"]')) continue;
-
-        // innerText는 하위 span 포함 전체 텍스트를 반환 (중첩 구조도 OK)
         let t = (span.innerText || '').trim();
-        // 말미 "더 보기" 제거 (피드에서 남아 있을 경우 대비)
         t = t.replace(/\\s*(더 보기|See more)\\s*$/i, '').trim();
-
         if (t.length < 20) continue;
         if (t.startsWith('@') || t.startsWith('http')) continue;
         if (UI_SKIP.test(t)) continue;
-        // 순수 ASCII 계정명/도메인 제외
         if (/^[a-zA-Z0-9._]+$/.test(t) && !t.includes(' ') && t.length < 25) continue;
-
         return t;
     }
     return '';
