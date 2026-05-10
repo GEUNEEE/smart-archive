@@ -17,25 +17,12 @@ load_dotenv(Path(__file__).parent / ".env")
 
 
 async def _fetch_threads_post_detail(page, url: str) -> dict:
-    """Threads 게시글 상세 페이지에서 조회수 + 전체 텍스트(더 보기 없음) 추출"""
+    """Threads 상세 페이지에서 조회수 + 전체 텍스트 추출 (더 보기 없음)"""
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=20_000)
         await page.wait_for_timeout(2000)
-
         views = await page.evaluate(_FETCH_VIEWS_JS) or 0
-
-        # 상세 페이지에서 _EXTRACT_POSTS_JS 재사용 → 더 보기 없이 전체 텍스트
-        posts = await page.evaluate(_EXTRACT_POSTS_JS)
-        current_path = page.url.replace("https://www.threads.com", "")
-        full_text = ""
-        for post in posts:
-            href = post.get("href", "")
-            if href and href in current_path:
-                full_text = post["text"]
-                break
-        if not full_text and posts:
-            full_text = posts[0]["text"]
-
+        full_text = await page.evaluate(_EXTRACT_DETAIL_TEXT_JS) or ""
         return {"views": views, "text": full_text}
     except Exception:
         return {"views": 0, "text": ""}
@@ -290,6 +277,34 @@ _FETCH_VIEWS_JS = """() => {
         }
     }
     return views;
+}"""
+
+
+# 상세 페이지 전용 텍스트 추출 JS
+# 피드용 _EXTRACT_POSTS_JS는 /post/ 링크 컨테이너를 찾아야 해서 상세 페이지에서 실패함.
+# 상세 페이지에는 자기 참조 링크가 없어 container 탐색 20단계 안에 /post/ 를 못 찾고 빈 배열 반환.
+# → 최상위 span[dir="auto"]의 innerText를 직접 가져오면 "더 보기" 없는 전체 텍스트를 얻을 수 있음.
+_EXTRACT_DETAIL_TEXT_JS = """() => {
+    const UI_SKIP = /^(\\d+[smhd분시일]?|팔로우|Follow|더 보기|See more|좋아요|Like|답글|Reply|공유|Share|Repost|리포스트|[\\d,.]+[KkMmBb]?\\s*(?:views?|조회수?))$/i;
+
+    for (const span of document.querySelectorAll('span[dir="auto"]')) {
+        // 다른 span[dir="auto"] 안에 중첩된 경우 제외 — 최상위 span만 처리
+        if (span.parentElement && span.parentElement.closest('span[dir="auto"]')) continue;
+
+        // innerText는 하위 span 포함 전체 텍스트를 반환 (중첩 구조도 OK)
+        let t = (span.innerText || '').trim();
+        // 말미 "더 보기" 제거 (피드에서 남아 있을 경우 대비)
+        t = t.replace(/\\s*(더 보기|See more)\\s*$/i, '').trim();
+
+        if (t.length < 20) continue;
+        if (t.startsWith('@') || t.startsWith('http')) continue;
+        if (UI_SKIP.test(t)) continue;
+        // 순수 ASCII 계정명/도메인 제외
+        if (/^[a-zA-Z0-9._]+$/.test(t) && !t.includes(' ') && t.length < 25) continue;
+
+        return t;
+    }
+    return '';
 }"""
 
 
