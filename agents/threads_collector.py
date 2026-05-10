@@ -140,8 +140,12 @@ async def collect_threads(max_items: int = None) -> list[dict]:
                     detail = await _fetch_threads_post_detail(page, item["url"])
                     if detail.get("views", 0) > 0:
                         item["views"] = detail["views"]
-                    if detail.get("text") and len(detail["text"]) > len(item.get("content", "")):
-                        item["content"] = detail["text"]
+                    if detail.get("text"):
+                        feed = item.get("content", "")
+                        # 피드 텍스트에 잡음이 있거나 상세 텍스트가 더 길면 교체
+                        feed_dirty = "Translate" in feed or "Related threads" in feed
+                        if feed_dirty or len(detail["text"]) > len(feed):
+                            item["content"] = detail["text"]
 
         finally:
             await ctx.close()
