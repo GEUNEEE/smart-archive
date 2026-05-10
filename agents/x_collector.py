@@ -116,6 +116,7 @@ async def collect_x(max_items: int = None) -> list[dict]:
                             views=views,
                             likes=likes,
                             comments=int(post.get("comments", 0)),
+                            original_date=post.get("date", ""),
                         ))
 
                         if len(items) >= max_items:
@@ -176,7 +177,11 @@ _EXTRACT_POSTS_JS = """() => {
                 if (m) views = parseInt(m[0]);
             }
 
-            results.push({ url, text: text.slice(0, 2000), author, likes, comments, views });
+            const timeEl = article.querySelector('time');
+            const dateStr = timeEl ? (timeEl.getAttribute('datetime') || '') : '';
+            const date = dateStr ? dateStr.slice(0, 10) : '';
+
+            results.push({ url, text: text.slice(0, 2000), author, likes, comments, views, date });
         } catch(e) {}
     });
 

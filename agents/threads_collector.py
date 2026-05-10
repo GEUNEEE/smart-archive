@@ -17,11 +17,26 @@ load_dotenv(Path(__file__).parent / ".env")
 
 
 async def _fetch_threads_post_detail(page, url: str) -> dict:
-    """Threads 게시글 상세 페이지에서 조회수와 전체 텍스트 추출"""
+    """Threads 게시글 상세 페이지에서 조회수 + 전체 텍스트(더 보기 없음) 추출"""
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=20_000)
-        await page.wait_for_timeout(1500)
-        return await page.evaluate(_FETCH_DETAIL_JS) or {"views": 0, "text": ""}
+        await page.wait_for_timeout(2000)
+
+        views = await page.evaluate(_FETCH_VIEWS_JS) or 0
+
+        # 상세 페이지에서 _EXTRACT_POSTS_JS 재사용 → 더 보기 없이 전체 텍스트
+        posts = await page.evaluate(_EXTRACT_POSTS_JS)
+        current_path = page.url.replace("https://www.threads.com", "")
+        full_text = ""
+        for post in posts:
+            href = post.get("href", "")
+            if href and href in current_path:
+                full_text = post["text"]
+                break
+        if not full_text and posts:
+            full_text = posts[0]["text"]
+
+        return {"views": views, "text": full_text}
     except Exception:
         return {"views": 0, "text": ""}
 
@@ -119,6 +134,7 @@ async def collect_threads(max_items: int = None) -> list[dict]:
                             url=url,
                             likes=likes,
                             comments=comments,
+                            original_date=post.get("date", ""),
                         ))
 
                         if len(items) >= max_items:
@@ -131,12 +147,14 @@ async def collect_threads(max_items: int = None) -> list[dict]:
                     if scroll_round % 10 == 0:
                         await page.wait_for_timeout(2000)
 
-            # 상세 페이지에서 조회수 추출
+            # 상세 페이지에서 조회수 + 전체 텍스트(더 보기 없이) 보강
             for item in items:
                 if item.get("url"):
                     detail = await _fetch_threads_post_detail(page, item["url"])
                     if detail.get("views", 0) > 0:
                         item["views"] = detail["views"]
+                    if detail.get("text") and len(detail["text"]) > len(item.get("content", "")):
+                        item["content"] = detail["text"]
 
         finally:
             await ctx.close()
@@ -236,15 +254,20 @@ _EXTRACT_POSTS_JS = """() => {
             });
         }
 
-        results.push({ href, text: fullText.slice(0, 2000), author, likes, comments });
+        // 게시글 날짜
+        const timeEl = container.querySelector('time');
+        const dateStr = timeEl ? (timeEl.getAttribute('datetime') || '') : '';
+        const date = dateStr ? dateStr.slice(0, 10) : '';
+
+        results.push({ href, text: fullText.slice(0, 2000), author, likes, comments, date });
     });
 
     return results;
 }"""
 
 
-# 상세 페이지 조회수·전체 텍스트 추출 JS
-_FETCH_DETAIL_JS = """() => {
+# 상세 페이지 조회수 추출 JS (텍스트는 _EXTRACT_POSTS_JS 재사용)
+_FETCH_VIEWS_JS = """() => {
     let views = 0;
     for (const el of document.querySelectorAll('span, div')) {
         const t = (el.innerText || '').trim();
@@ -266,21 +289,11 @@ _FETCH_DETAIL_JS = """() => {
             }
         }
     }
-    const textParts = [];
-    const seenTexts = new Set();
-    const UI_SKIP = /^(\\d+[smhd분시일]?|팔로우|Follow|더 보기|See more|좋아요|Like|답글|Reply|공유|Share|Repost|리포스트|[\\d,.]+[KkMmBb]?\\s*(?:views?|조회수?))$/i;
-    document.querySelectorAll('span[dir="auto"]').forEach(s => {
-        const t = (s.innerText || '').trim();
-        if (t.length < 3 || seenTexts.has(t) || t.startsWith('@') || t.startsWith('http')) return;
-        if (UI_SKIP.test(t)) return;
-        seenTexts.add(t);
-        textParts.push(t);
-    });
-    return { views, text: textParts.join('\\n').trim().slice(0, 2000) };
+    return views;
 }"""
 
 
-def _make_item(channel, title, content, author, url, views=0, likes=0, comments=0) -> dict:
+def _make_item(channel, title, content, author, url, views=0, likes=0, comments=0, original_date=None) -> dict:
     return {
         "channel": channel,
         "type": _guess_type(content),
@@ -292,7 +305,7 @@ def _make_item(channel, title, content, author, url, views=0, likes=0, comments=
         "likes": likes,
         "comments": comments,
         "collectedAt": datetime.now().strftime("%Y-%m-%d"),
-        "originalDate": datetime.now().strftime("%Y-%m-%d"),
+        "originalDate": original_date if original_date else datetime.now().strftime("%Y-%m-%d"),
         "tags": [],
         "aiSummary": "",
         "myMemo": "",
