@@ -308,14 +308,19 @@ _EXTRACT_DETAIL_TEXT_JS = """() => {
     }
 
     // span의 innerText에서 답글 구분자 이후를 잘라냄
-    // "Related threads" 또는 "\nTranslate\n" 가 메인 포스트와 답글을 구분
+    // 줄 단위 split으로 \r\n / \n 모두 처리
     const trimReplies = (t) => {
-        const relIdx = t.search(/\\nRelated threads(\\n|$)/i);
-        if (relIdx > 0) t = t.slice(0, relIdx);
-        // Translate 가 단독 줄로 등장하면 답글 시작 신호
-        const trIdx = t.search(/\\nTranslate\\n/i);
-        if (trIdx > 0) t = t.slice(0, trIdx);
-        return t.trim();
+        // "Related threads" 섹션 제거
+        const relParts = t.split(/Related threads/i);
+        if (relParts.length > 1 && relParts[0].trim().length > 10) t = relParts[0];
+        // 단독 줄 "Translate" 이후 제거 (답글과 다음 답글 사이 구분자)
+        const lines = t.split(/\r?\n/);
+        const result = [];
+        for (const line of lines) {
+            if (/^Translate$/i.test(line.trim())) break;
+            result.push(line);
+        }
+        return result.join('\\n').trim();
     };
 
     // 루트에서 첫 번째 실질 span의 innerText 반환 (답글 경계 후 잘라냄)
