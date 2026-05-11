@@ -16,6 +16,24 @@ from playwright.async_api import async_playwright
 load_dotenv(Path(__file__).parent / ".env")
 
 
+def _clean_content(text: str) -> str:
+    """피드/상세 텍스트에서 Translate·Related threads 잡음 제거 (Python 레벨 후처리)"""
+    if not text:
+        return text
+    # "Related threads" 이후 제거
+    m = re.search(r'Related threads', text, re.IGNORECASE)
+    if m and m.start() > 10:
+        text = text[:m.start()].rstrip()
+    # 단독 줄 "Translate" 이후 제거 (\xa0 포함)
+    lines = text.split('\n')
+    result = []
+    for line in lines:
+        if re.match(r'^[\s\xa0]*Translate[\s\xa0]*$', line, re.IGNORECASE):
+            break
+        result.append(line)
+    return '\n'.join(result).strip()
+
+
 async def _fetch_threads_post_detail(page, url: str) -> dict:
     """Threads 상세 페이지에서 조회수 + 전체 텍스트 추출 (더 보기 없음)"""
     try:
@@ -146,6 +164,8 @@ async def collect_threads(max_items: int = None) -> list[dict]:
                         feed_dirty = "Translate" in feed or "Related threads" in feed
                         if feed_dirty or len(detail["text"]) > len(feed):
                             item["content"] = detail["text"]
+                    # Python 레벨 후처리: detail 추출 실패 시에도 잡음 제거
+                    item["content"] = _clean_content(item.get("content", ""))
 
         finally:
             await ctx.close()
@@ -318,7 +338,7 @@ _EXTRACT_DETAIL_TEXT_JS = """() => {
         const relParts = t.split(/Related threads/i);
         if (relParts.length > 1 && relParts[0].trim().length > 10) t = relParts[0];
         // 단독 줄 "Translate" 이후 제거 (답글과 다음 답글 사이 구분자)
-        const lines = t.split(/\r?\n/);
+        const lines = t.split(/\\r?\\n/);
         const result = [];
         for (const line of lines) {
             if (/^Translate$/i.test(line.trim())) break;
@@ -333,7 +353,7 @@ _EXTRACT_DETAIL_TEXT_JS = """() => {
             if (s.parentElement && s.parentElement.closest('span[dir="auto"]')) continue;
             let t = (s.innerText || '').trim();
             t = t.replace(/\\s*(더 보기|See more)\\s*$/i, '').trim();
-            if (t.length < 20) continue;
+            if (t.length < 5) continue;
             if (t.startsWith('@') || t.startsWith('http')) continue;
             if (UI_SKIP.test(t)) continue;
             if (/^[a-zA-Z0-9._]+$/.test(t) && !t.includes(' ') && t.length < 25) continue;
