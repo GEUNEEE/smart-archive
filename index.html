@@ -1039,7 +1039,17 @@ function renderDetail(id) {
         <div class="detail-section-title">내용</div>
         <div class="detail-text">${item.content.replace(/</g,'&lt;').replace(/\n/g,'<br>')}</div>
       </div>` : ''}
-      ${item.url && !isYt ? `<div class="detail-section"><div class="detail-section-title">링크</div><a href="${item.url}" target="_blank">${item.url}</a></div>` : ''}
+      <div class="detail-section">
+        <div class="detail-section-title">링크</div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input type="url" class="memo-input" id="detail-url-input"
+            placeholder="https://..."
+            value="${(item.url||'').replace(/"/g,'&quot;')}"
+            style="flex:1;padding:7px 10px;font-size:12px;min-width:0">
+          <button class="btn btn-secondary" style="flex-shrink:0;font-size:12px;padding:7px 12px" onclick="saveMemoUrl('memo','${id}')">저장</button>
+          ${item.url ? `<a href="${item.url}" target="_blank" class="btn btn-secondary" style="flex-shrink:0;font-size:12px;padding:7px 12px" title="링크 열기">🔗</a>` : `<span id="memo-url-link-${id}"></span>`}
+        </div>
+      </div>
       <div class="detail-section">
         <div class="detail-section-title">AI 요약</div>
         <div class="detail-text" id="detail-ai-summary">${item.aiSummary ? item.aiSummary.replace(/</g,'&lt;').replace(/\n/g,'<br>') : '<span style="color:var(--text-muted)">요약 없음 — 아래 버튼으로 프롬프트 복사 후 Claude 결과를 붙여넣기</span>'}</div>
@@ -1194,6 +1204,19 @@ function closeDetail() {
 /* ============================================================
    MEMO SAVE
    ============================================================ */
+function saveMemoUrl(tab, id) {
+  const input = document.getElementById('detail-url-input');
+  if (!input) return;
+  const url = input.value.trim();
+  const arr = getData(KEYS[tab]);
+  const item = arr.find(i => i.id === id);
+  if (!item) return;
+  item.url = url;
+  saveData(KEYS[tab], arr);
+  renderDetail(id);
+  toast(url ? '링크 저장됨' : '링크 삭제됨');
+}
+
 function saveMemo(tab, id) {
   const val = document.getElementById('detail-memo').value;
   if (tab === 'viral') {
