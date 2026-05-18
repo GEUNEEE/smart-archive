@@ -929,7 +929,7 @@ function renderList() {
       </div>`;
     }).join('');
   } else if (currentTab === 'memo') {
-    const ytItems = items.filter(i => i.type === '유튜브링크' && i.url);
+    const ytItems = items.filter(i => i.url && (i.type === '유튜브링크' || /youtube\.com|youtu\.be/.test(i.url)));
     const groupBtn = items.length >= 2
       ? `<button class="btn btn-secondary" style="width:100%;font-size:12px;margin-bottom:6px" onclick="showGroupedView()">📋 ${items.length}개 항목 모아 보기 · AI 분석</button>`
       : '';
@@ -941,7 +941,8 @@ function renderList() {
        ${noTranscriptYt.length > 0 ? `<div style="background:#7C3AED12;border:1px solid #7C3AED25;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:12px;color:#A78BFA;display:flex;justify-content:space-between;align-items:center"><span>📄 전문 미추가 ${noTranscriptYt.length}개</span><a href="https://github.com/liang121/video-summarizer" target="_blank" style="font-size:11px;color:#A78BFA;opacity:.7">video-summarizer ↗</a></div>` : '<div style="background:#10B98112;border:1px solid #10B98125;border-radius:8px;padding:6px 10px;margin-bottom:8px;font-size:12px;color:#10B981">✅ 전체 전문 완료</div>'}`
       : '';
     container.innerHTML = groupBtn + ytAllBtn + items.map(item => {
-      const isYt = item.type === '유튜브링크' && item.url;
+      const isYtUrl = item.url && /youtube\.com|youtu\.be/.test(item.url);
+      const isYt = (item.type === '유튜브링크' || isYtUrl) && item.url;
       const ytId = isYt ? extractYouTubeId(item.url) : null;
       const thumb = ytId ? `<img src="https://img.youtube.com/vi/${ytId}/mqdefault.jpg" style="width:100%;border-radius:6px;margin-bottom:6px;aspect-ratio:16/9;object-fit:cover">` : '';
       const hasAICard = hasAI;
@@ -967,7 +968,7 @@ function renderList() {
         </div>
         <div class="card-actions">
           ${item.url ? `<a href="${item.url}" target="_blank" class="card-move-btn" onclick="event.stopPropagation()" style="text-decoration:none">🔗 링크</a>` : ''}
-          ${(item.type === '유튜브링크' && !item.transcript) ? `<button class="card-move-btn" style="color:#A78BFA;border-color:#7C3AED40" onclick="event.stopPropagation();openTranscriptPanel('${item.id}')">📄 전문 추가</button>` : ''}
+          ${((item.type === '유튜브링크' || isYtUrl) && !item.transcript) ? `<button class="card-move-btn" style="color:#A78BFA;border-color:#7C3AED40" onclick="event.stopPropagation();openTranscriptPanel('${item.id}')">📄 전문 추가</button>` : ''}
           <button class="card-move-btn" onclick="event.stopPropagation();showMoveMenu(event,'memo','${item.id}')">→ 이동</button>
         </div>
       </div>`;
@@ -2501,6 +2502,21 @@ function renderSettings() {
   </div>
 
   <div class="settings-section">
+    <div class="settings-section-title">📝 메모 유형 관리 (나의 메모함)</div>
+    ${(s.memoTypes||DEFAULT_SETTINGS.memoTypes).map((t,i) => `
+      <div class="channel-item">
+        <span class="channel-name">${t}</span>
+        <div class="channel-actions">
+          <button class="mini-btn del" onclick="deleteMemoType(${i})">삭제</button>
+        </div>
+      </div>`).join('')}
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <input class="form-input" id="new-memotype" placeholder="새 유형 (예: 뉴스링크, 팟캐스트)" style="flex:1">
+      <button class="btn btn-secondary" onclick="addMemoType()">추가</button>
+    </div>
+  </div>
+
+  <div class="settings-section">
     <div class="settings-section-title">📞 통화 유형 관리</div>
     ${(s.callTypes||[]).map((t,i) => `
       <div class="channel-item">
@@ -2709,6 +2725,30 @@ function deleteImgCat(i) {
   s.imageCategories.splice(i,1);
   saveSettings(s);
   renderSettings();
+}
+
+function addMemoType() {
+  const name = document.getElementById('new-memotype').value.trim();
+  if (!name) return;
+  const s = getSettings();
+  if (!s.memoTypes) s.memoTypes = [...DEFAULT_SETTINGS.memoTypes];
+  if (s.memoTypes.includes(name)) { toast('이미 존재하는 유형입니다'); return; }
+  s.memoTypes.push(name);
+  saveSettings(s);
+  renderSettings();
+  toast('메모 유형 추가됨');
+}
+
+function deleteMemoType(i) {
+  const s = getSettings();
+  if (!s.memoTypes || s.memoTypes.length <= 1) { toast('최소 1개 이상이어야 합니다'); return; }
+  const removed = s.memoTypes[i];
+  const locked = ['유튜브링크','인스타링크','스레드링크'];
+  if (locked.includes(removed)) { toast(`'${removed}'은 기본 유형이라 삭제할 수 없습니다`); return; }
+  s.memoTypes.splice(i, 1);
+  saveSettings(s);
+  renderSettings();
+  toast(`'${removed}' 유형 삭제됨`);
 }
 
 /* PASSWORD */
