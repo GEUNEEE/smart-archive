@@ -303,6 +303,7 @@ select.form-input{appearance:none;}
 .transcript-badge{font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600;}
 .transcript-badge.has{background:#7C3AED20;color:#A78BFA;}
 .transcript-badge.empty{background:var(--bg-card);color:var(--text-muted);border:1px solid var(--border);}
+.transcript-badge.failed{background:#EF444420;color:#EF4444;border:1px solid #EF444430;}
 .transcript-toggle-arrow{margin-left:auto;font-size:11px;color:var(--text-muted);}
 .transcript-howto{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:12px;line-height:2;color:var(--text-secondary);margin-bottom:12px;}
 .transcript-howto code{background:var(--bg-primary);padding:2px 8px;border-radius:4px;font-family:monospace;font-size:11px;color:#A78BFA;display:inline-block;margin:1px 0;}
@@ -589,8 +590,10 @@ function showApp() {
   switchTab('viral');
   updateStats();
   setTimeout(autoImportFromServer, 1200);
+  setTimeout(applyTranscriptPatches, 2000);
   setTimeout(checkForUpdates, 3000);
   setInterval(checkForUpdates, 5 * 60 * 1000);
+  setInterval(applyTranscriptPatches, 5 * 60 * 1000);
 }
 
 /* ── 번역 ── */
@@ -656,6 +659,48 @@ async function autoImportFromServer() {
 function manualImportFromServer() {
   localStorage.removeItem('sa_last_auto_import');
   autoImportFromServer().then(() => {});
+}
+
+/* ============================================================
+   TRANSCRIPT PATCH AUTO-IMPORT
+   imports/transcripts.json → memo 항목에 전문/요약 자동 적용
+   ============================================================ */
+async function applyTranscriptPatches(force) {
+  try {
+    const res = await fetch('./imports/transcripts.json?t=' + Date.now(), {cache: 'no-store'});
+    if (!res.ok) return;
+    const json = await res.json();
+    if (!json.patches || !json.exportedAt) return;
+
+    const lastApplied = localStorage.getItem('sa_last_transcript_import');
+    if (!force && lastApplied === json.exportedAt) return;
+
+    const arr = getData(KEYS.memo);
+    let updated = 0;
+    for (const patch of json.patches) {
+      if (!patch.url) continue;
+      const item = arr.find(i => i.url === patch.url);
+      if (!item) continue;
+      let changed = false;
+      if (patch.transcript && (!item.transcript || patch.force)) { item.transcript = patch.transcript; changed = true; }
+      if (patch.aiSummary && (!item.aiSummary || patch.force)) { item.aiSummary = patch.aiSummary; changed = true; }
+      if (patch.status) { item.transcriptStatus = patch.status; changed = true; }
+      if (changed) updated++;
+    }
+
+    localStorage.setItem('sa_last_transcript_import', json.exportedAt);
+    if (updated > 0) {
+      saveData(KEYS.memo, arr);
+      renderList();
+      if (currentTab === 'memo' && selectedId) selectItem(selectedId);
+      toast('📄 전문 분석 ' + updated + '개 자동 적용됨');
+    }
+  } catch(e) { /* 파일 없으면 무시 */ }
+}
+
+function manualApplyTranscripts() {
+  localStorage.removeItem('sa_last_transcript_import');
+  applyTranscriptPatches(true).then(() => {});
 }
 
 /* ============================================================
@@ -997,7 +1042,7 @@ function renderList() {
         </div>
         <div class="card-actions">
           ${item.url ? `<a href="${item.url}" target="_blank" class="card-move-btn" onclick="event.stopPropagation()" style="text-decoration:none">🔗 링크</a>` : ''}
-          ${((item.type === '유튜브링크' || isYtUrl) && !item.transcript) ? `<button class="card-move-btn" style="color:#A78BFA;border-color:#7C3AED40" onclick="event.stopPropagation();openTranscriptPanel('${item.id}')">📄 전문 추가</button>` : ''}
+          ${(item.type === '유튜브링크' || isYtUrl) ? `<button class="card-move-btn" style="color:#A78BFA;border-color:#7C3AED40" onclick="event.stopPropagation();openTranscriptPanel('${item.id}')">${item.transcript ? (item.transcriptStatus==='failed'?'⚠️ 재분석':'🔄 재분석') : '📄 전문 분석'}</button>` : ''}
           <button class="card-move-btn" onclick="event.stopPropagation();showMoveMenu(event,'memo','${item.id}')">→ 이동</button>
         </div>
       </div>`;
@@ -1194,16 +1239,23 @@ function renderDetail(id) {
       <div class="detail-section transcript-section">
         <div class="transcript-toggle-header" onclick="toggleTranscriptPanel('${id}')">
           <span class="transcript-toggle-title">📄 전문 분석 (video-summarizer)</span>
-          <span class="transcript-badge ${item.transcript ? 'has' : 'empty'}">${item.transcript ? '전문 있음 ✓' : '붙여넣기'}</span>
+          <span class="transcript-badge ${item.transcript ? 'has' : (item.transcriptStatus==='failed'?'failed':'empty')}">${item.transcript ? '전문 있음 ✓' : (item.transcriptStatus==='failed'?'⚠️ 실패':'분석 대기')}</span>
           <span class="transcript-toggle-arrow" id="transcript-arrow-${id}">${item.transcript ? '▼' : '▶'}</span>
         </div>
-        <div id="transcript-panel-${id}" style="margin-top:10px;display:${item.transcript ? 'block' : 'none'}">
+        <div id="transcript-panel-${id}" style="margin-top:10px;display:${item.transcript || item.transcriptStatus==='failed' ? 'block' : 'none'}">
+          ${!item.transcript ? `
+          <div style="background:#7C3AED18;border:1px solid #7C3AED30;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:var(--text-secondary)">
+            ${item.transcriptStatus==='failed'
+              ? '⚠️ 이전 분석이 실패했습니다. Claude Code가 자동으로 재시도하거나, 아래에 직접 붙여넣으세요.'
+              : '⏳ Claude Code가 분석 중이거나 대기 중입니다. 완료되면 자동으로 반영됩니다.'}
+            <div style="margin-top:8px;display:flex;gap:6px">
+              <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px" onclick="manualApplyTranscripts()">🔄 서버에서 최신 전문 가져오기</button>
+            </div>
+          </div>` : ''}
           <div class="transcript-howto">
-            <b>1. Claude Code 터미널에서 실행</b><br>
-            <code>/video-summarizer ${item.url || 'https://youtube.com/watch?v=...'}</code><br>
-            <b>2. 생성된 파일</b> → <code>./downloads/&lt;제목&gt;/</code> 폴더<br>
-            &nbsp;&nbsp;&nbsp;• <code>subtitle.vtt</code> (타임스탬프 포함) 또는 <code>transcript.txt</code><br>
-            <b>3. 파일 내용을 아래에 붙여넣고 저장</b> → 자동 하이라이트 + 정밀 AI 프롬프트 생성
+            <b>직접 붙여넣기 방법</b><br>
+            1. Claude Code 터미널: <code>/video-summarizer ${item.url || 'https://youtube.com/watch?v=...'}</code><br>
+            2. 생성된 <code>subtitle.vtt</code> 또는 <code>transcript.txt</code> 내용을 아래에 붙여넣기
           </div>
           <textarea class="transcript-paste" id="transcript-paste-${id}"
             placeholder="transcript.txt 또는 subtitle.vtt 내용을 여기에 붙여넣으면 자동저장됩니다..."
