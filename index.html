@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>스마트 아카이브 v4</title>
 <style>
 :root {
@@ -461,6 +464,8 @@ select.form-input{appearance:none;}
 /* ============================================================
    CONSTANTS & STORAGE KEYS
    ============================================================ */
+const APP_VERSION = '20260518-5';
+
 const KEYS = {
   viral: 'sa_viral',
   memo: 'sa_memo',
@@ -531,6 +536,28 @@ async function sha256(str) {
 }
 
 /* ============================================================
+   UPDATE CHECK
+   ============================================================ */
+async function checkForUpdates() {
+  try {
+    const r = await fetch(location.pathname + '?_cv=' + Date.now(), {cache: 'no-store'});
+    if (!r.ok) return;
+    const html = await r.text();
+    const m = html.match(/APP_VERSION = '([^']+)'/);
+    if (m && m[1] !== APP_VERSION) showUpdateBanner();
+  } catch(e) {}
+}
+
+function showUpdateBanner() {
+  if (document.getElementById('update-banner')) return;
+  const el = document.createElement('div');
+  el.id = 'update-banner';
+  el.style.cssText = 'position:fixed;bottom:72px;left:50%;transform:translateX(-50%);background:#6366F1;color:#fff;padding:10px 16px;border-radius:10px;z-index:9999;font-size:13px;display:flex;align-items:center;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,.4);white-space:nowrap;';
+  el.innerHTML = `<span>🔄 새 버전이 배포됐습니다</span><button onclick="location.reload(true)" style="background:#fff;color:#6366F1;border:none;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer">지금 업데이트</button><button onclick="this.parentNode.remove()" style="background:transparent;border:none;color:rgba(255,255,255,.7);font-size:18px;cursor:pointer;line-height:1">×</button>`;
+  document.body.appendChild(el);
+}
+
+/* ============================================================
    AUTH
    ============================================================ */
 function checkAuth() {
@@ -562,6 +589,8 @@ function showApp() {
   switchTab('viral');
   updateStats();
   setTimeout(autoImportFromServer, 1200);
+  setTimeout(checkForUpdates, 3000);
+  setInterval(checkForUpdates, 5 * 60 * 1000);
 }
 
 /* ── 번역 ── */
