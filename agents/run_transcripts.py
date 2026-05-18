@@ -143,7 +143,7 @@ def main():
         transcript = fetch_transcript(vid)
         if not transcript:
             print("[SKIP - 자막 없음]")
-            patches[url] = {'url': url, 'status': 'failed', 'analyzedAt': datetime.now().strftime('%Y-%m-%d')}
+            patches[url] = {'url': url, 'videoId': vid, 'status': 'failed', 'analyzedAt': datetime.now().strftime('%Y-%m-%d')}
             _save(patches)
             continue
 
@@ -155,10 +155,12 @@ def main():
 
         patches[url] = {
             'url': url,
+            'videoId': vid,
             'transcript': transcript,
             'aiSummary': summary,
             'analyzedAt': datetime.now().strftime('%Y-%m-%d'),
             'status': 'done',
+            'force': True,  # 앱에서 기존 AI요약도 덮어씀
         }
         _save(patches)
         time.sleep(0.5)  # Groq rate limit 여유

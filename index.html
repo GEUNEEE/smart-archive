@@ -465,7 +465,7 @@ select.form-input{appearance:none;}
 /* ============================================================
    CONSTANTS & STORAGE KEYS
    ============================================================ */
-const APP_VERSION = '20260518-5';
+const APP_VERSION = '20260518-6';
 
 const KEYS = {
   viral: 'sa_viral',
@@ -678,24 +678,37 @@ async function applyTranscriptPatches(force) {
     const arr = getData(KEYS.memo);
     let updated = 0;
     for (const patch of json.patches) {
-      if (!patch.url) continue;
-      const item = arr.find(i => i.url === patch.url);
+      if (!patch.url && !patch.videoId) continue;
+      // 1) 정확한 URL 매칭
+      let item = patch.url ? arr.find(i => i.url === patch.url) : null;
+      // 2) video ID 기반 매칭 (URL 형식 차이 fallback)
+      if (!item) {
+        const pVid = patch.videoId || extractYouTubeId(patch.url || '');
+        if (pVid) item = arr.find(i => extractYouTubeId(i.url || '') === pVid);
+      }
       if (!item) continue;
       let changed = false;
-      if (patch.transcript && (!item.transcript || patch.force)) { item.transcript = patch.transcript; changed = true; }
+      // 전문은 항상 최신 값으로 덮어씀
+      if (patch.transcript) { item.transcript = patch.transcript; changed = true; }
+      // AI 요약: 없을 때만 채우거나 force 플래그 있을 때 덮어씀
       if (patch.aiSummary && (!item.aiSummary || patch.force)) { item.aiSummary = patch.aiSummary; changed = true; }
+      // 상태 항상 업데이트
       if (patch.status) { item.transcriptStatus = patch.status; changed = true; }
       if (changed) updated++;
     }
 
-    localStorage.setItem('sa_last_transcript_import', json.exportedAt);
+    // 타임스탬프는 실제 적용 성공 후 저장 (0개 매칭 시 다음 로드에서 재시도)
     if (updated > 0) {
       saveData(KEYS.memo, arr);
+      localStorage.setItem('sa_last_transcript_import', json.exportedAt);
       renderList();
       if (currentTab === 'memo' && selectedId) selectItem(selectedId);
       toast('📄 전문 분석 ' + updated + '개 자동 적용됨');
+    } else {
+      // 패치는 있지만 매칭 항목 없을 때 → 무한루프 방지용 저장
+      if (json.patches.length > 0) localStorage.setItem('sa_last_transcript_import', json.exportedAt);
     }
-  } catch(e) { /* 파일 없으면 무시 */ }
+  } catch(e) { console.warn('[transcript patch]', e); }
 }
 
 function manualApplyTranscripts() {
@@ -1018,7 +1031,7 @@ function renderList() {
       const isYtUrl = item.url && /youtube\.com|youtu\.be/.test(item.url);
       const isYt = (item.type === '유튜브링크' || isYtUrl) && item.url;
       const ytId = isYt ? extractYouTubeId(item.url) : null;
-      const thumb = ytId ? `<img src="https://img.youtube.com/vi/${ytId}/mqdefault.jpg" style="width:100%;border-radius:6px;margin-bottom:6px;aspect-ratio:16/9;object-fit:cover">` : '';
+      const thumb = ytId ? `<img src="https://img.youtube.com/vi/${ytId}/mqdefault.jpg" style="width:100%;border-radius:6px;margin-bottom:6px;aspect-ratio:16/9;object-fit:cover" onerror="this.style.display='none'">` : '';
       const hasAICard = hasAI;
       const ytBtn = isYt
         ? `<div style="margin-top:8px" onclick="event.stopPropagation()">
