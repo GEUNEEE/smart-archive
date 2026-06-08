@@ -575,15 +575,22 @@ function showUpdateBanner() {
 /* ============================================================
    AUTH
    ============================================================ */
+let _remotePwHash = null;
+const _configFetch = fetch('data/config.json?v=' + Date.now(), {cache:'no-store'})
+  .then(r => r.ok ? r.json() : null)
+  .then(cfg => { if (cfg && cfg.pwHash) _remotePwHash = cfg.pwHash; })
+  .catch(() => {});
+
 function checkAuth() {
   const auth = sessionStorage.getItem('sa_auth');
   if (auth === '1') showApp();
 }
 
 async function doLogin() {
+  await _configFetch;
   const pw = document.getElementById('pw-input').value.trim();
   const hash = await sha256(pw);
-  const stored = lsGet(KEYS.password) || DEFAULT_PW_HASH;
+  const stored = _remotePwHash || lsGet(KEYS.password) || DEFAULT_PW_HASH;
   if (hash === stored) {
     sessionStorage.setItem('sa_auth','1');
     showApp();
@@ -3093,7 +3100,7 @@ async function changePassword() {
   if (nw !== conf) { toast('새 비밀번호가 일치하지 않습니다'); return; }
   if (!nw) { toast('새 비밀번호를 입력하세요'); return; }
   const curHash = await sha256(cur);
-  const stored = lsGet(KEYS.password) || DEFAULT_PW_HASH;
+  const stored = _remotePwHash || lsGet(KEYS.password) || DEFAULT_PW_HASH;
   if (curHash !== stored) { toast('현재 비밀번호가 틀렸습니다'); return; }
   const newHash = await sha256(nw);
   lsSet(KEYS.password, newHash);
