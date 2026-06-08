@@ -353,7 +353,7 @@ select.form-input{appearance:none;}
   <div class="login-box">
     <div class="login-logo">📦 스마트 아카이브</div>
     <div class="login-sub">마케팅 수집 시스템 v5</div>
-    <input class="login-input" type="password" id="pw-input" placeholder="비밀번호 입력" autocomplete="current-password">
+    <input class="login-input" type="password" id="pw-input" placeholder="비밀번호 입력" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false">
     <button class="login-btn" onclick="doLogin()">로그인</button>
     <div class="login-error" id="login-error">비밀번호가 틀렸습니다.</div>
   </div>
@@ -581,7 +581,7 @@ function checkAuth() {
 }
 
 async function doLogin() {
-  const pw = document.getElementById('pw-input').value;
+  const pw = document.getElementById('pw-input').value.trim();
   const hash = await sha256(pw);
   const stored = lsGet(KEYS.password) || DEFAULT_PW_HASH;
   if (hash === stored) {
@@ -3087,9 +3087,9 @@ function deleteMemoType(i) {
 
 /* PASSWORD */
 async function changePassword() {
-  const cur = document.getElementById('pw-cur').value;
-  const nw = document.getElementById('pw-new').value;
-  const conf = document.getElementById('pw-confirm').value;
+  const cur = document.getElementById('pw-cur').value.trim();
+  const nw = document.getElementById('pw-new').value.trim();
+  const conf = document.getElementById('pw-confirm').value.trim();
   if (nw !== conf) { toast('새 비밀번호가 일치하지 않습니다'); return; }
   if (!nw) { toast('새 비밀번호를 입력하세요'); return; }
   const curHash = await sha256(cur);
