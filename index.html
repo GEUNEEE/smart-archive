@@ -114,12 +114,19 @@ a:hover{color:var(--accent-hover);}
 .card-move-btn:hover{background:var(--accent);border-color:var(--accent);color:#fff;}
 .select-mode .card-actions{display:none;}
 /* MOVE MENU POPOVER */
-.move-menu{position:fixed;z-index:9999;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.3);padding:4px;min-width:170px;}
-.move-menu-item{padding:8px 12px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--text-primary);}
+.move-menu{position:fixed;z-index:9999;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.3);padding:4px;min-width:170px;max-height:360px;overflow-y:auto;}
+.move-menu-item{padding:7px 12px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--text-primary);}
 .move-menu-item:hover{background:var(--bg-secondary);}
+.move-menu-header{padding:6px 12px 2px;font-size:11px;color:var(--text-muted);font-weight:700;letter-spacing:.04em;text-transform:uppercase;}
+.move-menu-divider{height:1px;background:var(--border);margin:3px 4px;}
 /* DRAG STATE */
 .card.dragging{opacity:.4;transform:scale(.97);}
 .tab-btn.drag-over{background:var(--accent)!important;color:#fff!important;outline:2px solid var(--accent);}
+/* SETTINGS DRAG */
+.channel-item.dragging{opacity:.4;}
+.channel-item.drag-over{border:2px dashed var(--accent)!important;background:var(--accent)10!important;}
+.drag-handle{cursor:grab;color:var(--text-muted);margin-right:6px;font-size:15px;flex-shrink:0;user-select:none;}
+.drag-handle:active{cursor:grabbing;}
 /* EDITABLE TITLE / CONTENT */
 .editable-title{width:100%;background:transparent;border:1px solid transparent;border-radius:6px;color:var(--text-primary);font-size:20px;font-weight:700;line-height:1.3;padding:3px 6px;margin-bottom:8px;outline:none;font-family:inherit;box-sizing:border-box;transition:border-color .15s,background .15s;display:block;}
 .editable-title:hover{border-color:var(--border);}
@@ -516,6 +523,7 @@ let groupedViewItems = [];
 let selectMode = false;
 let selectedIds = new Set();
 let dragItem = null;
+let settingsDragSrc = null;
 
 /* ============================================================
    INIT
@@ -1130,9 +1138,9 @@ function renderList() {
   }
 
   const s = getSettings();
+  const STATUS_COLORS = {'할일':'#F59E0B','검토':'#6366F1','보관':'#A0A0A0','읽음':'#10B981'};
 
   if (currentTab === 'viral') {
-    const STATUS_COLORS = {'할일':'#F59E0B','검토':'#6366F1','보관':'#A0A0A0','읽음':'#10B981'};
     container.innerHTML = items.map(item => {
       const chName = item.channel || item.platform || '?';
       const ch = s.channels.find(c=>c.name===chName)||{color:'#888'};
@@ -1158,7 +1166,10 @@ function renderList() {
           ${(item.tags||[]).map((t,ti)=>`<span class="card-tag-chip" onclick="removeCardTag(event,'viral','${item.id}',${ti})">${t.replace(/</g,'&lt;')} <span class="del">×</span></span>`).join('')}
           <span class="card-tag-add" onclick="openCTP(event,'viral','${item.id}',this)">+ 태그</span>
         </div>
-        <div class="card-actions"><button class="card-move-btn" onclick="event.stopPropagation();showMoveMenu(event,'viral','${item.id}')">→ 이동</button></div>
+        <div class="card-actions">
+          <button class="card-move-btn" style="color:${stColor};border-color:${stColor}40" onclick="event.stopPropagation();showStatusMenu(event,'viral','${item.id}')">● ${st}</button>
+          <button class="card-move-btn" onclick="event.stopPropagation();showMoveMenu(event,'viral','${item.id}')">→ 이동</button>
+        </div>
       </div>`;
     }).join('');
   } else if (currentTab === 'memo') {
@@ -1202,6 +1213,7 @@ function renderList() {
         <div class="card-actions">
           ${item.url ? `<a href="${item.url}" target="_blank" class="card-move-btn" onclick="event.stopPropagation()" style="text-decoration:none">🔗 링크</a>` : ''}
           ${(item.type === '유튜브링크' || isYtUrl) ? `<button class="card-move-btn" style="color:#A78BFA;border-color:#7C3AED40" onclick="event.stopPropagation();openTranscriptPanel('${item.id}')">${item.transcript ? (item.transcriptStatus==='failed'?'⚠️ 재분석':'🔄 재분석') : '📄 전문 분석'}</button>` : ''}
+          <button class="card-move-btn" style="color:${STATUS_COLORS[item.status||'보관']||'#888'};border-color:${STATUS_COLORS[item.status||'보관']||'#888'}40" onclick="event.stopPropagation();showStatusMenu(event,'memo','${item.id}')">● ${item.status||'보관'}</button>
           <button class="card-move-btn" onclick="event.stopPropagation();showMoveMenu(event,'memo','${item.id}')">→ 이동</button>
         </div>
       </div>`;
@@ -1227,7 +1239,10 @@ function renderList() {
           ${(item.tags||[]).map((t,ti)=>`<span class="card-tag-chip" onclick="removeCardTag(event,'calls','${item.id}',${ti})">${t.replace(/</g,'&lt;')} <span class="del">×</span></span>`).join('')}
           <span class="card-tag-add" onclick="openCTP(event,'calls','${item.id}',this)">+ 태그</span>
         </div>
-        <div class="card-actions"><button class="card-move-btn" onclick="event.stopPropagation();showMoveMenu(event,'calls','${item.id}')">→ 이동</button></div>
+        <div class="card-actions">
+          <button class="card-move-btn" style="color:${STATUS_COLORS[item.status||'보관']||'#888'};border-color:${STATUS_COLORS[item.status||'보관']||'#888'}40" onclick="event.stopPropagation();showStatusMenu(event,'calls','${item.id}')">● ${item.status||'보관'}</button>
+          <button class="card-move-btn" onclick="event.stopPropagation();showMoveMenu(event,'calls','${item.id}')">→ 이동</button>
+        </div>
       </div>`).join('');
   } else if (currentTab === 'images') {
     container.innerHTML = items.map(item => `
@@ -2801,7 +2816,12 @@ function renderSettings() {
   <div class="settings-section">
     <div class="settings-section-title">📝 메모 유형 관리 (나의 메모함)</div>
     ${(s.memoTypes||DEFAULT_SETTINGS.memoTypes).map((t,i) => `
-      <div class="channel-item">
+      <div class="channel-item" draggable="true"
+        ondragstart="onSettingsDragStart(event,'memoTypes',${i})"
+        ondragover="onSettingsDragOver(event,'memoTypes',${i})"
+        ondrop="onSettingsDrop(event,'memoTypes',${i})"
+        ondragend="onSettingsDragEnd(event)">
+        <span class="drag-handle">⠿</span>
         <span class="channel-name">${t}</span>
         <div class="channel-actions">
           <button class="mini-btn del" onclick="deleteMemoType(${i})">삭제</button>
@@ -2816,7 +2836,12 @@ function renderSettings() {
   <div class="settings-section">
     <div class="settings-section-title">📞 통화 유형 관리</div>
     ${(s.callTypes||[]).map((t,i) => `
-      <div class="channel-item">
+      <div class="channel-item" draggable="true"
+        ondragstart="onSettingsDragStart(event,'callTypes',${i})"
+        ondragover="onSettingsDragOver(event,'callTypes',${i})"
+        ondrop="onSettingsDrop(event,'callTypes',${i})"
+        ondragend="onSettingsDragEnd(event)">
+        <span class="drag-handle">⠿</span>
         <span class="channel-name">${t}</span>
         <div class="channel-actions">
           <button class="mini-btn del" onclick="deleteCallType(${i})">삭제</button>
@@ -2831,7 +2856,12 @@ function renderSettings() {
   <div class="settings-section">
     <div class="settings-section-title">🖼 이미지 카테고리 관리</div>
     ${(s.imageCategories||[]).map((t,i) => `
-      <div class="channel-item">
+      <div class="channel-item" draggable="true"
+        ondragstart="onSettingsDragStart(event,'imageCategories',${i})"
+        ondragover="onSettingsDragOver(event,'imageCategories',${i})"
+        ondrop="onSettingsDrop(event,'imageCategories',${i})"
+        ondragend="onSettingsDragEnd(event)">
+        <span class="drag-handle">⠿</span>
         <span class="channel-name">${t}</span>
         <div class="channel-actions">
           <button class="mini-btn del" onclick="deleteImgCat(${i})">삭제</button>
@@ -4036,22 +4066,105 @@ function getMoveTargets(fromTab) {
 
 function showMoveMenu(e, fromTab, id) {
   closeMoveMenu();
-  const targets = getMoveTargets(fromTab);
-  if (!targets.length) { toast('이동 가능한 탭이 없습니다'); return; }
   const menu = document.createElement('div');
   menu.className = 'move-menu';
   const rect = e.target.getBoundingClientRect();
-  menu.style.left = `${Math.min(rect.left, window.innerWidth - 180)}px`;
+  menu.style.left = `${Math.min(rect.left, window.innerWidth - 200)}px`;
+  menu.style.top = `${Math.min(rect.bottom + 4, window.innerHeight - 370)}px`;
+
+  const s = getSettings();
+  const groups = {
+    viral: [
+      {label:'📊 바이럴 탭', types:['바이럴','판매글','레퍼런스']},
+      {label:'💬 메모로 이동', types:['유튜브링크','인스타링크','스레드링크','틱톡링크','아이디어','메모','업무']},
+      {label:'📞 통화 탭', types:['통화','회의']},
+    ],
+    memo: [
+      {label:'💬 메모 탭', types:(s.memoTypes||DEFAULT_SETTINGS.memoTypes)},
+      {label:'📊 바이럴로 이동', types:['바이럴','판매글','레퍼런스']},
+      {label:'📞 통화 탭', types:['통화','회의']},
+    ],
+    calls: [
+      {label:'📞 통화 탭', types:['통화','회의']},
+      {label:'📊 바이럴로 이동', types:['바이럴','판매글','레퍼런스']},
+      {label:'💬 메모로 이동', types:(s.memoTypes||DEFAULT_SETTINGS.memoTypes)},
+    ],
+  };
+
+  (groups[fromTab]||[]).forEach((group, gi) => {
+    if (gi > 0) {
+      const div = document.createElement('div');
+      div.className = 'move-menu-divider';
+      menu.appendChild(div);
+    }
+    const hdr = document.createElement('div');
+    hdr.className = 'move-menu-header';
+    hdr.textContent = group.label;
+    menu.appendChild(hdr);
+    group.types.forEach(type => {
+      const el = document.createElement('div');
+      el.className = 'move-menu-item';
+      el.textContent = type;
+      el.onclick = () => { closeMoveMenu(); changeType(fromTab, id, type); };
+      menu.appendChild(el);
+    });
+  });
+
+  document.body.appendChild(menu);
+  setTimeout(() => document.addEventListener('click', closeMoveMenu, {once:true}), 0);
+}
+
+function showStatusMenu(e, tab, id) {
+  closeMoveMenu();
+  const menu = document.createElement('div');
+  menu.className = 'move-menu';
+  const rect = e.target.getBoundingClientRect();
+  menu.style.left = `${Math.min(rect.left, window.innerWidth - 160)}px`;
   menu.style.top = `${rect.bottom + 4}px`;
-  targets.forEach(({tab, label}) => {
-    const item = document.createElement('div');
-    item.className = 'move-menu-item';
-    item.textContent = label;
-    item.onclick = () => { closeMoveMenu(); confirmMove(fromTab, id, tab); };
-    menu.appendChild(item);
+  const LABELS = {'할일':'📌 할일','검토':'🔍 검토','보관':'📦 보관','읽음':'✅ 읽음'};
+  ['할일','검토','보관','읽음'].forEach(s => {
+    const el = document.createElement('div');
+    el.className = 'move-menu-item';
+    el.textContent = LABELS[s];
+    el.onclick = () => { closeMoveMenu(); setStatus(tab, id, s); };
+    menu.appendChild(el);
   });
   document.body.appendChild(menu);
   setTimeout(() => document.addEventListener('click', closeMoveMenu, {once:true}), 0);
+}
+
+function onSettingsDragStart(e, listName, idx) {
+  settingsDragSrc = {listName, idx};
+  e.dataTransfer.effectAllowed = 'move';
+  e.currentTarget.classList.add('dragging');
+}
+
+function onSettingsDragOver(e, listName, idx) {
+  if (!settingsDragSrc || settingsDragSrc.listName !== listName) return;
+  e.preventDefault();
+  document.querySelectorAll('.channel-item.drag-over').forEach(el => el.classList.remove('drag-over'));
+  if (settingsDragSrc.idx !== idx) e.currentTarget.classList.add('drag-over');
+}
+
+function onSettingsDrop(e, listName, idx) {
+  e.preventDefault();
+  if (!settingsDragSrc || settingsDragSrc.listName !== listName || settingsDragSrc.idx === idx) return;
+  const s = getSettings();
+  const arr = [...(s[listName] || [])];
+  const [item] = arr.splice(settingsDragSrc.idx, 1);
+  arr.splice(idx, 0, item);
+  s[listName] = arr;
+  saveSettings(s);
+  settingsDragSrc = null;
+  renderSettings();
+  toast('순서가 변경되었습니다');
+}
+
+function onSettingsDragEnd(e) {
+  document.querySelectorAll('.channel-item.dragging, .channel-item.drag-over').forEach(el => {
+    el.classList.remove('dragging', 'drag-over');
+  });
+  settingsDragSrc = null;
 }
 
 function showBatchMoveMenu(e) {
