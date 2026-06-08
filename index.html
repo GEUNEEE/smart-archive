@@ -498,7 +498,7 @@ const DEFAULT_SETTINGS = {
   ],
   callTypes: ['미팅','상담','브레인스토밍','업무협의','기타'],
   imageCategories: ['레퍼런스','콘텐츠아이디어','디자인','스크린샷','기타'],
-  memoTypes: ['유튜브링크','인스타링크','스레드링크','아이디어','생각정리','기타링크','메모','업무'],
+  memoTypes: ['유튜브링크','인스타링크','스레드링크','틱톡링크','아이디어','생각정리','기타링크','메모','업무'],
   geminiApiKey: '',
   groqApiKey: ''
 };
@@ -778,6 +778,12 @@ function changeType(fromTab, id, newType) {
 function savePlatform(id, val) {
   saveField('viral', id, 'channel', val);
   saveField('viral', id, 'platform', val);
+  renderSidebar();
+}
+
+function setStatus(tab, id, value) {
+  saveField(tab, id, 'status', value);
+  renderList();
   renderSidebar();
 }
 
@@ -1304,7 +1310,12 @@ function renderDetail(id) {
           <optgroup label="바이럴 탭">
             ${['바이럴','판매글','레퍼런스'].map(t=>`<option value="${t}"${item.type===t?' selected':''}>${t}</option>`).join('')}
           </optgroup>
-          <optgroup label="→ 메모 탭">
+          <optgroup label="→ 메모로 이동">
+            <option value="유튜브링크">유튜브링크</option>
+            <option value="인스타링크">인스타링크</option>
+            <option value="스레드링크">스레드링크</option>
+            <option value="틱톡링크">틱톡링크</option>
+            <option value="아이디어">아이디어</option>
             <option value="메모">메모</option>
             <option value="업무">업무</option>
           </optgroup>
@@ -1358,7 +1369,10 @@ function renderDetail(id) {
         <button class="btn btn-secondary" onclick="copyAnalysisPrompt('${id}')">🤖 AI 분석 프롬프트 복사</button>
         ${item.url?`<button class="btn btn-secondary" onclick="window.open('${item.url}','_blank')">🔗 원본 보기</button>`:''}
         <button class="btn btn-warning" onclick="toggleBest('${id}')">${item.isBest?'★ BEST 해제':'☆ BEST 설정'}</button>
-        <button class="btn btn-secondary" onclick="cycleStatus('viral','${id}')" title="클릭해서 상태 변경">📌 ${item.status||'보관'}</button>
+        <select onchange="setStatus('viral','${id}',this.value)"
+          style="background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;outline:none">
+          ${['할일','검토','보관','읽음'].map(s=>`<option value="${s}"${(item.status||'보관')===s?' selected':''}>${{'할일':'📌 할일','검토':'🔍 검토','보관':'📦 보관','읽음':'✅ 읽음'}[s]}</option>`).join('')}
+        </select>
         <button class="btn btn-danger" onclick="deleteItem('viral','${id}')">🗑 삭제</button>
       </div>`;
     // 영문 콘텐츠 자동 번역
@@ -1415,6 +1429,10 @@ function renderDetail(id) {
             <option value="통화">통화</option>
             <option value="회의">회의</option>
           </optgroup>
+        </select>
+        <select onchange="setStatus('memo','${id}',this.value)"
+          style="background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border);border-radius:12px;padding:3px 10px;font-size:12px;cursor:pointer;outline:none">
+          ${['할일','검토','보관','읽음'].map(s=>`<option value="${s}"${(item.status||'보관')===s?' selected':''}>${{'할일':'📌 할일','검토':'🔍 검토','보관':'📦 보관','읽음':'✅ 읽음'}[s]}</option>`).join('')}
         </select>
         ${(item.tags||[]).map(t=>`<span class="detail-tag">${t}</span>`).join('')}
       </div>
