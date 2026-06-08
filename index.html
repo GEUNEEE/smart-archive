@@ -495,7 +495,7 @@ const DEFAULT_SETTINGS = {
   ],
   callTypes: ['미팅','상담','브레인스토밍','업무협의','기타'],
   imageCategories: ['레퍼런스','콘텐츠아이디어','디자인','스크린샷','기타'],
-  memoTypes: ['유튜브링크','인스타링크','스레드링크','아이디어','생각정리','기타링크','메모'],
+  memoTypes: ['유튜브링크','인스타링크','스레드링크','아이디어','생각정리','기타링크','메모','업무'],
   geminiApiKey: '',
   groqApiKey: ''
 };
@@ -504,7 +504,7 @@ const DEFAULT_SETTINGS = {
    STATE
    ============================================================ */
 let currentTab = 'viral';
-let currentFilter = {type:'전체', channel:'전체', category:'전체', tags:[], search:''};
+let currentFilter = {type:'전체', channel:'전체', category:'전체', status:'전체', tags:[], search:''};
 let selectedId = null;
 let formType = 'viral';
 let addImageFiles = [];
@@ -590,6 +590,7 @@ function showApp() {
   switchTab('viral');
   updateStats();
   setTimeout(autoImportFromServer, 1200);
+  setTimeout(fetchArchive, 1500);
   setTimeout(applyTranscriptPatches, 2000);
   setTimeout(checkForUpdates, 3000);
   setInterval(checkForUpdates, 5 * 60 * 1000);
@@ -659,6 +660,89 @@ async function autoImportFromServer() {
 function manualImportFromServer() {
   localStorage.removeItem('sa_last_auto_import');
   autoImportFromServer().then(() => {});
+}
+
+/* ============================================================
+   ARCHIVE.JSON FETCH (v5 schema → app format)
+   data/archive.json: Claude 스킬이 채우는 v5 형식 단일 소스
+   ============================================================ */
+async function fetchArchive() {
+  try {
+    const res = await fetch('./data/archive.json?t=' + Date.now(), {cache: 'no-store'});
+    if (!res.ok) return;
+    const v5items = await res.json();
+    if (!Array.isArray(v5items) || !v5items.length) return;
+
+    const versionKey = (v5items[0].id || '') + (v5items[0].date || '') + v5items.length;
+    if (localStorage.getItem('sa_last_archive_fetch') === versionKey) return;
+
+    const buckets = {viral:[], memo:[], calls:[]};
+    const existing = {
+      viral: getData(KEYS.viral),
+      memo:  getData(KEYS.memo),
+      calls: getData(KEYS.calls),
+    };
+    const existingIds = {
+      viral: new Set(existing.viral.map(i=>i.id).filter(Boolean)),
+      memo:  new Set(existing.memo.map(i=>i.id).filter(Boolean)),
+      calls: new Set(existing.calls.map(i=>i.id).filter(Boolean)),
+    };
+    const existingUrls = {
+      viral: new Set(existing.viral.map(i=>i.url).filter(Boolean)),
+      memo:  new Set(existing.memo.map(i=>i.url).filter(Boolean)),
+    };
+
+    for (const v5 of v5items) {
+      const bucket = getAppKey(v5.type);
+      if (!bucket) continue;
+      if (v5.id  && existingIds[bucket] && existingIds[bucket].has(v5.id))  continue;
+      if (v5.url && existingUrls[bucket] && existingUrls[bucket].has(v5.url)) continue;
+      buckets[bucket].push(v5ToAppFormat(v5));
+    }
+
+    let added = 0;
+    if (buckets.viral.length)  { saveData(KEYS.viral, [...buckets.viral,  ...existing.viral]);  added += buckets.viral.length; }
+    if (buckets.memo.length)   { saveData(KEYS.memo,  [...buckets.memo,   ...existing.memo]);   added += buckets.memo.length; }
+    if (buckets.calls.length)  { saveData(KEYS.calls, [...buckets.calls,  ...existing.calls]);  added += buckets.calls.length; }
+
+    localStorage.setItem('sa_last_archive_fetch', versionKey);
+    if (added > 0) { updateStats(); renderList(); toast('📦 아카이브 ' + added + '개 동기화됨'); }
+  } catch(e) { /* data/archive.json 없으면 무시 */ }
+}
+
+function manualFetchArchive() {
+  localStorage.removeItem('sa_last_archive_fetch');
+  fetchArchive().then(() => {});
+}
+
+function v5ToAppFormat(v5) {
+  return {
+    ...v5,
+    // v5→v4 호환 브리지 (렌더링 코드가 v4 필드명 사용)
+    channel:     v5.platform   || v5.channel     || '',
+    aiSummary:   v5.summary    || v5.aiSummary    || '',
+    collectedAt: v5.date       || v5.collectedAt  || '',
+    myMemo:      v5.memo       || v5.myMemo       || '',
+    content:     v5.raw        || v5.content      || '',
+    // memo 전용
+    type:        v5.subtype    || v5.type         || '',
+    savedAt:     v5.date       || v5.savedAt      || '',
+    myThought:   v5.memo       || v5.myThought    || '',
+    // calls 전용
+    createdAt:   v5.date       || v5.createdAt    || '',
+    fullContent: v5.fullContent || v5.raw         || '',
+  };
+}
+
+function getAppKey(v5type) {
+  switch(v5type) {
+    case '바이럴': return 'viral';
+    case '메모':
+    case '업무':   return 'memo';
+    case '통화':
+    case '회의':   return 'calls';
+    default:       return null;
+  }
 }
 
 /* ============================================================
@@ -867,6 +951,14 @@ function renderSidebar() {
   const s = getSettings();
   let html = '';
 
+  const statusItems = [
+    {label:'전체', value:'전체'},
+    {label:'할일', value:'할일'},
+    {label:'검토', value:'검토'},
+    {label:'보관', value:'보관'},
+    {label:'읽음', value:'읽음'},
+  ];
+
   if (currentTab === 'viral') {
     html += sidebarSection('유형', [
       {label:'전체', value:'전체'},
@@ -876,8 +968,10 @@ function renderSidebar() {
     ], 'type');
     html += sidebarSection('채널', [{label:'전체', value:'전체'}, ...s.channels.map(c=>({label:c.name, value:c.name, color:c.color}))], 'channel');
     html += sidebarSection('분류', [{label:'전체', value:'전체'}, ...s.categories.map(c=>({label:c.name, value:c.name, color:c.color}))], 'category');
+    html += sidebarSection('상태', statusItems, 'status');
   } else if (currentTab === 'memo') {
     html += sidebarSection('유형', [{label:'전체',value:'전체'}, ...(s.memoTypes||DEFAULT_SETTINGS.memoTypes).map(t=>({label:t,value:t}))], 'type');
+    html += sidebarSection('상태', statusItems, 'status');
   } else if (currentTab === 'calls') {
     html += sidebarSection('유형', [{label:'전체',value:'전체'}, ...(s.callTypes||DEFAULT_SETTINGS.callTypes).map(t=>({label:t,value:t}))], 'type');
   } else if (currentTab === 'images') {
@@ -951,11 +1045,13 @@ function getFilteredItems() {
   if (currentTab === 'viral') {
     items = getData(KEYS.viral);
     if (currentFilter.type !== '전체') items = items.filter(i=>i.type===currentFilter.type);
-    if (currentFilter.channel !== '전체') items = items.filter(i=>i.channel===currentFilter.channel);
+    if (currentFilter.channel !== '전체') items = items.filter(i=>(i.channel||i.platform)===currentFilter.channel);
     if (currentFilter.category !== '전체') items = items.filter(i=>i.category===currentFilter.category);
+    if (currentFilter.status !== '전체') items = items.filter(i=>(i.status||'보관')===currentFilter.status);
   } else if (currentTab === 'memo') {
     items = getData(KEYS.memo);
     if (currentFilter.type !== '전체') items = items.filter(i=>i.type===currentFilter.type);
+    if (currentFilter.status !== '전체') items = items.filter(i=>(i.status||'보관')===currentFilter.status);
   } else if (currentTab === 'calls') {
     items = getData(KEYS.calls);
     if (currentFilter.type !== '전체') items = items.filter(i=>i.type===currentFilter.type);
@@ -972,7 +1068,8 @@ function getFilteredItems() {
     items = items.filter(i =>
       (i.title||'').toLowerCase().includes(s) ||
       (i.content||'').toLowerCase().includes(s) ||
-      (i.aiSummary||'').toLowerCase().includes(s) ||
+      (i.aiSummary||i.summary||'').toLowerCase().includes(s) ||
+      (i.memo||i.myMemo||'').toLowerCase().includes(s) ||
       (i.tags||[]).join(' ').toLowerCase().includes(s)
     );
   }
@@ -991,16 +1088,21 @@ function renderList() {
   const s = getSettings();
 
   if (currentTab === 'viral') {
+    const STATUS_COLORS = {'할일':'#F59E0B','검토':'#6366F1','보관':'#A0A0A0','읽음':'#10B981'};
     container.innerHTML = items.map(item => {
-      const ch = s.channels.find(c=>c.name===item.channel)||{color:'#888'};
+      const chName = item.channel || item.platform || '?';
+      const ch = s.channels.find(c=>c.name===chName)||{color:'#888'};
       const cat = s.categories.find(c=>c.name===item.category)||{color:'#888'};
+      const st = item.status || '보관';
+      const stColor = STATUS_COLORS[st] || '#888';
       return `<div class="card ${selectedId===item.id?'active':''} ${selectedIds.has(item.id)?'selected':''}" data-id="${item.id}" draggable="true" ondragstart="onCardDragStart(event,'${item.id}')" ondragend="onCardDragEnd(event)" onclick="selectItem('${item.id}')">
         <div class="card-check">✓</div>
         <button class="card-del" onclick="event.stopPropagation();quickDelete('viral','${item.id}')">×</button>
         <div class="card-badges">
-          <span class="badge" style="background:${ch.color}20;color:${ch.color}">${item.channel||'?'}</span>
+          <span class="badge" style="background:${ch.color}20;color:${ch.color}">${chName}</span>
           <span class="badge" style="background:#6366F120;color:#818CF8">${item.type||'바이럴'}</span>
           ${item.isBest?'<span class="best-badge">BEST</span>':''}
+          ${st!=='보관'?`<span class="badge" style="background:${stColor}20;color:${stColor};cursor:pointer" onclick="event.stopPropagation();cycleStatus('viral','${item.id}')">${st}</span>`:''}
         </div>
         <div class="card-title">${item.title}</div>
         <div class="card-meta">
@@ -1142,9 +1244,10 @@ function renderDetail(id) {
     const items = getData(KEYS.viral);
     const item = items.find(i=>i.id===id);
     if (!item) return;
-    const ch = s.channels.find(c=>c.name===item.channel)||{color:'#888'};
+    const chName = item.channel || item.platform || '';
+    const ch = s.channels.find(c=>c.name===chName)||{color:'#888'};
     const cat = s.categories.find(c=>c.name===item.category)||{color:'#888'};
-    const isThreads = item.channel === '스레드';
+    const isThreads = chName === '스레드' || item.platform === 'threads';
     const bodyText = (item.content || item.title || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     document.getElementById('detail-content').innerHTML = `
       <button class="detail-close-btn" onclick="closeDetail()">← 목록으로</button>
@@ -1153,7 +1256,7 @@ function renderDetail(id) {
         onblur="saveField('viral','${id}','title',this.value)"
         onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}">
       <div class="detail-badges">
-        <span class="badge" style="background:${ch.color}20;color:${ch.color}">${item.channel}</span>
+        <span class="badge" style="background:${ch.color}20;color:${ch.color}">${chName}</span>
         <span class="badge" style="background:#6366F120;color:#818CF8">${item.type}</span>
         <span class="badge" style="background:${cat.color}20;color:${cat.color}">${item.category}</span>
         ${item.isBest?'<span class="best-badge">⭐ BEST</span>':''}
@@ -1200,6 +1303,7 @@ function renderDetail(id) {
         <button class="btn btn-secondary" onclick="copyAnalysisPrompt('${id}')">🤖 AI 분석 프롬프트 복사</button>
         ${item.url?`<button class="btn btn-secondary" onclick="window.open('${item.url}','_blank')">🔗 원본 보기</button>`:''}
         <button class="btn btn-warning" onclick="toggleBest('${id}')">${item.isBest?'★ BEST 해제':'☆ BEST 설정'}</button>
+        <button class="btn btn-secondary" onclick="cycleStatus('viral','${id}')" title="클릭해서 상태 변경">📌 ${item.status||'보관'}</button>
         <button class="btn btn-danger" onclick="deleteItem('viral','${id}')">🗑 삭제</button>
       </div>`;
     // 영문 콘텐츠 자동 번역
@@ -1570,6 +1674,20 @@ function toggleBest(id) {
     renderList();
     toast(item.isBest ? '⭐ BEST 설정됨' : 'BEST 해제됨');
   }
+}
+
+function cycleStatus(tab, id) {
+  const key = tab === 'viral' ? KEYS.viral : KEYS.memo;
+  const arr = getData(key);
+  const item = arr.find(i=>i.id===id);
+  if (!item) return;
+  const order = ['할일','검토','보관','읽음'];
+  const cur = order.indexOf(item.status||'보관');
+  item.status = order[(cur + 1) % order.length];
+  saveData(key, arr);
+  renderList();
+  if (selectedId === id) renderDetail(id);
+  toast('상태: ' + item.status);
 }
 
 /* ============================================================
@@ -2663,6 +2781,10 @@ function renderSettings() {
     <div style="margin-top:12px">
       <button class="btn" style="background:var(--accent)" onclick="manualImportFromServer()">🔄 수집 결과 새로 불러오기</button>
       <div style="font-size:12px;color:var(--text-muted);margin-top:6px">수집 에이전트 실행 후 GitHub Pages가 업데이트되면 클릭해서 최신 항목 가져오기</div>
+    </div>
+    <div style="margin-top:12px">
+      <button class="btn" style="background:#7C3AED" onclick="manualFetchArchive()">📦 아카이브 재동기화</button>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:6px">Claude 스킬로 data/archive.json이 업데이트된 경우 클릭해서 동기화 (v5 스키마)</div>
     </div>
     <div style="margin-top:16px;font-size:12px;color:var(--text-muted)" id="usage-info">사용량 계산 중...</div>
   </div>`;
