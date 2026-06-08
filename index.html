@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>스마트 아카이브 v4</title>
+<title>스마트 아카이브 v5</title>
 <style>
 :root {
   --bg-primary: #0F0F0F;
@@ -342,7 +342,7 @@ select.form-input{appearance:none;}
 <div id="login-screen">
   <div class="login-box">
     <div class="login-logo">📦 스마트 아카이브</div>
-    <div class="login-sub">마케팅 수집 시스템 v4</div>
+    <div class="login-sub">마케팅 수집 시스템 v5</div>
     <input class="login-input" type="password" id="pw-input" placeholder="비밀번호 입력" autocomplete="current-password">
     <button class="login-btn" onclick="doLogin()">로그인</button>
     <div class="login-error" id="login-error">비밀번호가 틀렸습니다.</div>
@@ -465,7 +465,7 @@ select.form-input{appearance:none;}
 /* ============================================================
    CONSTANTS & STORAGE KEYS
    ============================================================ */
-const APP_VERSION = '20260518-6';
+const APP_VERSION = '20260608-v5';
 
 const KEYS = {
   viral: 'sa_viral',
@@ -912,7 +912,7 @@ function switchTab(tab) {
   exitSelectMode();
   currentTab = tab;
   selectedId = null;
-  currentFilter = {type:'전체', channel:'전체', category:'전체', tags:[], search:''};
+  currentFilter = {type:'전체', channel:'전체', category:'전체', status:'전체', tags:[], search:''};
 
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
 
