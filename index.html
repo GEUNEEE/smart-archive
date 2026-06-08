@@ -467,6 +467,9 @@ select.form-input{appearance:none;}
    ============================================================ */
 const APP_VERSION = '20260608-v5';
 
+const PLATFORM_LABELS = {instagram:'인스타그램',youtube:'유튜브',tiktok:'틱톡',threads:'스레드',x:'X',web:'웹'};
+function platLabel(p){ return PLATFORM_LABELS[p]||p||''; }
+
 const KEYS = {
   viral: 'sa_viral',
   memo: 'sa_memo',
@@ -745,6 +748,39 @@ function getAppKey(v5type) {
   }
 }
 
+function changeType(fromTab, id, newType) {
+  if (!newType) return;
+  const TAB_FOR = t => ['바이럴','판매글','레퍼런스'].includes(t) ? 'viral' :
+                       ['통화','회의'].includes(t) ? 'calls' : 'memo';
+  const toTab = TAB_FOR(newType);
+  const fromKey = KEYS[fromTab];
+  const toKey   = KEYS[toTab];
+  const fromArr = getData(fromKey);
+  const idx = fromArr.findIndex(i => i.id === id);
+  if (idx === -1) return;
+  const item = {...fromArr[idx], type: newType};
+  if (fromKey === toKey) {
+    fromArr[idx] = item;
+    saveData(fromKey, fromArr);
+    renderDetail(id);
+    renderList();
+  } else {
+    fromArr.splice(idx, 1);
+    saveData(fromKey, fromArr);
+    const toArr = getData(toKey);
+    saveData(toKey, [item, ...toArr]);
+    selectedId = null;
+    switchTab(toTab);
+  }
+  toast('유형 변경: ' + newType);
+}
+
+function savePlatform(id, val) {
+  saveField('viral', id, 'channel', val);
+  saveField('viral', id, 'platform', val);
+  renderSidebar();
+}
+
 /* ============================================================
    TRANSCRIPT PATCH AUTO-IMPORT
    imports/transcripts.json → memo 항목에 전문/요약 자동 적용
@@ -966,7 +1002,9 @@ function renderSidebar() {
       {label:'판매글', value:'판매글'},
       {label:'레퍼런스', value:'레퍼런스'}
     ], 'type');
-    html += sidebarSection('채널', [{label:'전체', value:'전체'}, ...s.channels.map(c=>({label:c.name, value:c.name, color:c.color}))], 'channel');
+    const _viralAll = getData(KEYS.viral);
+    const _platVals = [...new Set(_viralAll.map(i=>i.channel||i.platform||'').filter(Boolean))].sort();
+    html += sidebarSection('플랫폼', [{label:'전체',value:'전체'}, ..._platVals.map(p=>({label:platLabel(p)||p,value:p}))], 'channel');
     html += sidebarSection('분류', [{label:'전체', value:'전체'}, ...s.categories.map(c=>({label:c.name, value:c.name, color:c.color}))], 'category');
     html += sidebarSection('상태', statusItems, 'status');
   } else if (currentTab === 'memo') {
@@ -1256,8 +1294,25 @@ function renderDetail(id) {
         onblur="saveField('viral','${id}','title',this.value)"
         onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}">
       <div class="detail-badges">
-        <span class="badge" style="background:${ch.color}20;color:${ch.color}">${chName}</span>
-        <span class="badge" style="background:#6366F120;color:#818CF8">${item.type}</span>
+        <select onchange="savePlatform('${id}',this.value)"
+          style="background:${ch.color}20;color:var(--text-primary);border:1px solid ${ch.color}40;border-radius:12px;padding:3px 10px;font-size:12px;cursor:pointer;outline:none">
+          ${['instagram','youtube','tiktok','threads','x','web'].map(p=>`<option value="${p}"${chName===p?' selected':''}>${platLabel(p)}</option>`).join('')}
+          ${!['instagram','youtube','tiktok','threads','x','web'].includes(chName) && chName ? `<option value="${chName}" selected>${chName}</option>` : ''}
+        </select>
+        <select onchange="changeType('viral','${id}',this.value)"
+          style="background:#6366F120;color:#818CF8;border:1px solid #818CF840;border-radius:12px;padding:3px 10px;font-size:12px;cursor:pointer;outline:none;font-weight:600">
+          <optgroup label="바이럴 탭">
+            ${['바이럴','판매글','레퍼런스'].map(t=>`<option value="${t}"${item.type===t?' selected':''}>${t}</option>`).join('')}
+          </optgroup>
+          <optgroup label="→ 메모 탭">
+            <option value="메모">메모</option>
+            <option value="업무">업무</option>
+          </optgroup>
+          <optgroup label="→ 통화 탭">
+            <option value="통화">통화</option>
+            <option value="회의">회의</option>
+          </optgroup>
+        </select>
         <span class="badge" style="background:${cat.color}20;color:${cat.color}">${item.category}</span>
         ${item.isBest?'<span class="best-badge">⭐ BEST</span>':''}
       </div>
@@ -1346,8 +1401,20 @@ function renderDetail(id) {
         onblur="saveField('memo','${id}','title',this.value)"
         onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}">
       <div class="detail-badges">
-        <select onchange="saveField('memo','${id}','type',this.value);renderList()" style="background:#6366F120;color:#818CF8;border:1px solid #818CF840;border-radius:12px;padding:3px 10px;font-size:12px;cursor:pointer;outline:none;font-weight:600">
-          ${(getSettings().memoTypes||DEFAULT_SETTINGS.memoTypes).map(t=>`<option value="${t}"${t===(item.type||'메모')?' selected':''}>${t}</option>`).join('')}
+        <select onchange="changeType('memo','${id}',this.value)"
+          style="background:#6366F120;color:#818CF8;border:1px solid #818CF840;border-radius:12px;padding:3px 10px;font-size:12px;cursor:pointer;outline:none;font-weight:600">
+          <optgroup label="메모 탭">
+            ${(getSettings().memoTypes||DEFAULT_SETTINGS.memoTypes).map(t=>`<option value="${t}"${t===(item.type||'메모')?' selected':''}>${t}</option>`).join('')}
+          </optgroup>
+          <optgroup label="→ 바이럴 탭">
+            <option value="바이럴">바이럴</option>
+            <option value="판매글">판매글</option>
+            <option value="레퍼런스">레퍼런스</option>
+          </optgroup>
+          <optgroup label="→ 통화 탭">
+            <option value="통화">통화</option>
+            <option value="회의">회의</option>
+          </optgroup>
         </select>
         ${(item.tags||[]).map(t=>`<span class="detail-tag">${t}</span>`).join('')}
       </div>
