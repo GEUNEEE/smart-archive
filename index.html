@@ -123,10 +123,13 @@ a:hover{color:var(--accent-hover);}
 .card.dragging{opacity:.4;transform:scale(.97);}
 .tab-btn.drag-over{background:var(--accent)!important;color:#fff!important;outline:2px solid var(--accent);}
 /* SETTINGS DRAG */
+.channel-item[draggable]{cursor:grab;user-select:none;}
+.channel-item[draggable]:active{cursor:grabbing;}
+.channel-item[draggable] *{pointer-events:none;}
+.channel-item[draggable] .mini-btn{pointer-events:auto;}
 .channel-item.dragging{opacity:.4;}
-.channel-item.drag-over{border:2px dashed var(--accent)!important;background:var(--accent)10!important;}
-.drag-handle{cursor:grab;color:var(--text-muted);margin-right:6px;font-size:15px;flex-shrink:0;user-select:none;}
-.drag-handle:active{cursor:grabbing;}
+.channel-item.drag-over{border:2px dashed var(--accent)!important;background:rgba(99,102,241,.08)!important;}
+.drag-handle{color:var(--text-muted);margin-right:6px;font-size:15px;flex-shrink:0;}
 /* EDITABLE TITLE / CONTENT */
 .editable-title{width:100%;background:transparent;border:1px solid transparent;border-radius:6px;color:var(--text-primary);font-size:20px;font-weight:700;line-height:1.3;padding:3px 6px;margin-bottom:8px;outline:none;font-family:inherit;box-sizing:border-box;transition:border-color .15s,background .15s;display:block;}
 .editable-title:hover{border-color:var(--border);}
@@ -4076,7 +4079,7 @@ function showMoveMenu(e, fromTab, id) {
   const groups = {
     viral: [
       {label:'📊 바이럴 탭', types:['바이럴','판매글','레퍼런스']},
-      {label:'💬 메모로 이동', types:['유튜브링크','인스타링크','스레드링크','틱톡링크','아이디어','메모','업무']},
+      {label:'💬 메모로 이동', types:(s.memoTypes||DEFAULT_SETTINGS.memoTypes)},
       {label:'📞 통화 탭', types:['통화','회의']},
     ],
     memo: [
@@ -4142,6 +4145,7 @@ function onSettingsDragStart(e, listName, idx) {
 function onSettingsDragOver(e, listName, idx) {
   if (!settingsDragSrc || settingsDragSrc.listName !== listName) return;
   e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
   document.querySelectorAll('.channel-item.drag-over').forEach(el => el.classList.remove('drag-over'));
   if (settingsDragSrc.idx !== idx) e.currentTarget.classList.add('drag-over');
 }
