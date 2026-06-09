@@ -528,6 +528,7 @@ let selectMode = false;
 let selectedIds = new Set();
 let dragItem = null;
 let settingsDragSrc = null;
+let _autoBackupTimer = null;
 
 /* ============================================================
    INIT
@@ -885,7 +886,15 @@ function getSettings() {
   return s;
 }
 
-function saveData(key, arr) { lsSet(key, arr); updateStats(); }
+function saveData(key, arr) {
+  lsSet(key, arr);
+  updateStats();
+  // 데이터 키(viral/memo/calls/imgMeta)만 자동 백업 트리거
+  if ([KEYS.viral, KEYS.memo, KEYS.calls, KEYS.imgMeta].includes(key)) {
+    clearTimeout(_autoBackupTimer);
+    _autoBackupTimer = setTimeout(runAutoBackup, 10000); // 10초 후 실행
+  }
+}
 function saveSettings(s) { lsSet(KEYS.settings, s); }
 
 /* ============================================================
@@ -2902,8 +2911,8 @@ function renderSettings() {
   <div class="settings-section">
     <div class="settings-section-title">💾 데이터 관리</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-secondary" onclick="exportJSON()">⬇️ 전체 내보내기</button>
-      <button class="btn btn-secondary" onclick="document.getElementById('import-json').click()">⬆️ 전체 가져오기</button>
+      <button class="btn btn-secondary" onclick="exportJSON()">⬇️ JSON 백업 다운로드</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('import-json').click()">⬆️ JSON 백업 복원</button>
       <input type="file" id="import-json" accept=".json" style="display:none" onchange="importJSON(this)">
       <button class="btn btn-secondary" onclick="document.getElementById('import-imgs').click()">🖼 이미지 일괄 가져오기</button>
       <input type="file" id="import-imgs" accept="image/*" multiple style="display:none" onchange="importImages(this)">
@@ -2917,6 +2926,61 @@ function renderSettings() {
       <div style="font-size:12px;color:var(--text-muted);margin-top:6px">Claude 스킬로 data/archive.json이 업데이트된 경우 클릭해서 동기화 (v5 스키마)</div>
     </div>
     <div style="margin-top:16px;font-size:12px;color:var(--text-muted)" id="usage-info">사용량 계산 중...</div>
+  </div>
+
+  <div class="settings-section" style="border-color:#0EA5E9">
+    <div class="settings-section-title">☁️ 자동 백업 & 기기 동기화</div>
+
+    <!-- 로컬 자동 백업 -->
+    <div style="margin-bottom:18px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text-secondary)">📱 로컬 자동 백업</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
+        데이터 변경 후 10초 뒤 자동으로 최근 3개 스냅샷을 저장합니다.
+      </div>
+      ${(() => {
+        const backups = lsGet('sa_local_backups') || [];
+        if (!backups.length) return '<div style="font-size:12px;color:var(--text-muted)">아직 백업 없음 — 데이터를 입력하면 자동 생성</div>';
+        return backups.map((b, i) => `
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:var(--bg-secondary);border-radius:8px;margin-bottom:6px">
+            <div>
+              <span style="font-size:13px">${b.at.slice(0,16).replace('T',' ')}</span>
+              <span style="font-size:11px;color:var(--text-muted);margin-left:8px">바이럴 ${(b.viral||[]).length} · 메모 ${(b.memo||[]).length} · 통화 ${(b.calls||[]).length}</span>
+            </div>
+            <button class="btn btn-secondary" style="font-size:11px;padding:3px 10px" onclick="restoreLocalBackup(${i})">복원</button>
+          </div>`).join('');
+      })()}
+      <button class="btn btn-secondary" style="margin-top:6px;font-size:12px" onclick="runAutoBackup();renderSettings();toast('📸 백업 완료')">📸 지금 백업</button>
+    </div>
+
+    <!-- GitHub API 동기화 -->
+    <div style="border-top:1px solid var(--border);padding-top:16px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text-secondary)">🔗 GitHub 기기 동기화</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.7">
+        GitHub Personal Access Token(PAT)을 입력하면 모든 기기에서 데이터를 공유할 수 있습니다.<br>
+        <b>발급 방법:</b> github.com → Settings → Developer settings → Personal access tokens → Fine-grained tokens<br>
+        권한: <code>GEUNEEE/smart-archive</code> 레포 → Contents: <b>Read and Write</b>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <input class="form-input" id="github-pat-input" type="password"
+          placeholder="github_pat_..."
+          value="${(lsGet('sa_github_pat')||'').replace(/"/g,'&quot;')}"
+          style="flex:1;font-family:monospace;font-size:12px">
+        <button class="btn btn-primary" style="background:#0EA5E9;border-color:#0EA5E9" onclick="saveGitHubPat()">저장</button>
+      </div>
+      ${lsGet('sa_github_pat') ? `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="btn btn-primary" style="background:#0EA5E9;border-color:#0EA5E9" onclick="syncToGitHub(true)">⬆️ GitHub에 저장 (업로드)</button>
+        <button class="btn btn-secondary" onclick="fetchFromGitHub()">⬇️ GitHub에서 가져오기</button>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin-bottom:6px">
+        <input type="checkbox" ${s.autoGithubSync?'checked':''} onchange="toggleAutoGithubSync()">
+        변경 시 자동 동기화 (10초 디바운스)
+      </label>
+      <div style="font-size:12px;color:var(--text-muted)">
+        마지막 동기화: ${lsGet('sa_last_github_sync') ? lsGet('sa_last_github_sync').slice(0,16).replace('T',' ') : '없음'}
+      </div>` : `
+      <div style="font-size:12px;color:var(--text-muted)">PAT를 입력하면 동기화 버튼이 활성화됩니다.</div>`}
+    </div>
   </div>`;
 
   document.getElementById('settings-content').innerHTML = html;
@@ -3113,6 +3177,147 @@ async function changePassword() {
   document.getElementById('pw-cur').value = '';
   document.getElementById('pw-new').value = '';
   document.getElementById('pw-confirm').value = '';
+}
+
+/* ============================================================
+   AUTO-BACKUP & GITHUB SYNC
+   ============================================================ */
+function runAutoBackup() {
+  const snapshot = {
+    at: new Date().toISOString(),
+    viral: getData(KEYS.viral),
+    memo:  getData(KEYS.memo),
+    calls: getData(KEYS.calls),
+  };
+  const backups = lsGet('sa_local_backups') || [];
+  backups.unshift(snapshot);
+  while (backups.length > 3) backups.pop();
+  lsSet('sa_local_backups', backups);
+
+  // GitHub 자동 동기화가 켜져 있으면 함께 실행
+  const s = getSettings();
+  if (s.autoGithubSync && lsGet('sa_github_pat')) {
+    syncToGitHub(false);
+  }
+}
+
+function restoreLocalBackup(idx) {
+  const backups = lsGet('sa_local_backups') || [];
+  if (!backups[idx]) return;
+  const b = backups[idx];
+  showModal('로컬 백업 복원',
+    `<p style="font-size:14px;color:var(--text-secondary)">${b.at.slice(0,16).replace('T',' ')} 시점으로 복원합니다.</p>
+     <p style="font-size:13px;color:#EF4444;margin-top:6px">⚠️ 현재 데이터가 덮어써집니다.</p>`,
+    [{label:'취소',cls:'btn-secondary',action:'closeModal()'},
+     {label:'복원',cls:'btn-danger',action:`confirmRestoreLocal(${idx})`}]);
+}
+function confirmRestoreLocal(idx) {
+  closeModal();
+  const backups = lsGet('sa_local_backups') || [];
+  const b = backups[idx];
+  if (!b) return;
+  if (b.viral) saveData(KEYS.viral, b.viral);
+  if (b.memo)  saveData(KEYS.memo,  b.memo);
+  if (b.calls) saveData(KEYS.calls, b.calls);
+  renderList(); renderSidebar(); updateStats();
+  toast('✅ 로컬 백업 복원 완료');
+}
+
+function saveGitHubPat() {
+  const val = (document.getElementById('github-pat-input').value || '').trim();
+  lsSet('sa_github_pat', val || null);
+  toast(val ? '✅ PAT 저장됨 — GitHub 동기화 가능' : 'PAT 삭제됨');
+  renderSettings();
+}
+
+function toggleAutoGithubSync() {
+  const s = getSettings();
+  s.autoGithubSync = !s.autoGithubSync;
+  saveSettings(s);
+  renderSettings();
+}
+
+async function syncToGitHub(showFeedback = true) {
+  const pat = lsGet('sa_github_pat');
+  if (!pat) { if (showFeedback) toast('⚠️ GitHub PAT를 먼저 입력하세요'); return; }
+  const repo = 'GEUNEEE/smart-archive';
+  if (showFeedback) toast('🔄 GitHub에 저장 중...');
+
+  const payload = {
+    version: '5.1',
+    savedAt: new Date().toISOString(),
+    viral:  getData(KEYS.viral),
+    memo:   getData(KEYS.memo),
+    calls:  getData(KEYS.calls),
+  };
+  const raw = JSON.stringify(payload, null, 2);
+  // base64 encode (UTF-8 safe)
+  const bytes = new TextEncoder().encode(raw);
+  const binStr = Array.from(bytes).map(b => String.fromCharCode(b)).join('');
+  const content = btoa(binStr);
+
+  try {
+    const h = {
+      'Authorization': 'token ' + pat,
+      'Accept': 'application/vnd.github.v3+json',
+      'Content-Type': 'application/json'
+    };
+    // 현재 파일 SHA 조회 (업데이트 시 필요)
+    const getRes = await fetch('https://api.github.com/repos/' + repo + '/contents/data/user_data.json', {headers:h});
+    const sha = getRes.ok ? (await getRes.json()).sha : undefined;
+
+    const putRes = await fetch('https://api.github.com/repos/' + repo + '/contents/data/user_data.json', {
+      method: 'PUT', headers: h,
+      body: JSON.stringify({
+        message: 'sync: ' + new Date().toISOString().slice(0,16),
+        content,
+        ...(sha ? {sha} : {})
+      })
+    });
+    if (!putRes.ok) {
+      const err = await putRes.json();
+      throw new Error(err.message || putRes.status);
+    }
+    lsSet('sa_last_github_sync', new Date().toISOString());
+    if (showFeedback) { toast('✅ GitHub 동기화 완료'); renderSettings(); }
+  } catch(e) {
+    if (showFeedback) toast('⚠️ 동기화 실패: ' + e.message);
+  }
+}
+
+async function fetchFromGitHub() {
+  const pat = lsGet('sa_github_pat');
+  if (!pat) { toast('⚠️ GitHub PAT를 먼저 입력하세요'); return; }
+  const repo = 'GEUNEEE/smart-archive';
+  toast('🔄 GitHub에서 불러오는 중...');
+  try {
+    const res = await fetch('https://api.github.com/repos/' + repo + '/contents/data/user_data.json', {
+      headers: {'Authorization':'token '+pat,'Accept':'application/vnd.github.v3+json'}
+    });
+    if (!res.ok) { toast('⚠️ GitHub에 저장된 데이터 없음 (먼저 업로드하세요)'); return; }
+    const file = await res.json();
+    const decoded = new TextDecoder().decode(
+      Uint8Array.from(atob(file.content.replace(/\n/g,'')), c => c.charCodeAt(0))
+    );
+    const data = JSON.parse(decoded);
+
+    let added = 0;
+    for (const k of ['viral','memo','calls']) {
+      if (!data[k] || !data[k].length) continue;
+      const existing = getData(KEYS[k]);
+      const existingIds = new Set(existing.map(i=>i.id).filter(Boolean));
+      const newItems = data[k].filter(i => i.id && !existingIds.has(i.id));
+      if (newItems.length) {
+        saveData(KEYS[k], [...existing, ...newItems]);
+        added += newItems.length;
+      }
+    }
+    renderList(); renderSidebar(); updateStats();
+    toast('✅ GitHub 동기화 완료 — ' + added + '개 추가됨 (' + (data.savedAt||'').slice(0,10) + ')');
+    renderSettings();
+  } catch(e) {
+    toast('⚠️ 불러오기 실패: ' + e.message);
+  }
 }
 
 /* EXPORT / IMPORT */
