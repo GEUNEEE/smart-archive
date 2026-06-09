@@ -618,6 +618,7 @@ function showApp() {
   setTimeout(checkForUpdates, 3000);
   setInterval(checkForUpdates, 5 * 60 * 1000);
   setInterval(applyTranscriptPatches, 5 * 60 * 1000);
+  startScheduledSync();
 }
 
 /* ── 번역 ── */
@@ -2976,6 +2977,10 @@ function renderSettings() {
         <input type="checkbox" ${s.autoGithubSync?'checked':''} onchange="toggleAutoGithubSync()">
         변경 시 자동 동기화 (10초 디바운스)
       </label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin-bottom:8px">
+        <input type="checkbox" ${s.scheduledSync?'checked':''} onchange="toggleScheduledSync()">
+        📅 정시 자동 동기화 (6·12·18·24시)
+      </label>
       <div style="font-size:12px;color:var(--text-muted)">
         마지막 동기화: ${lsGet('sa_last_github_sync') ? lsGet('sa_last_github_sync').slice(0,16).replace('T',' ') : '없음'}
       </div>` : `
@@ -3318,6 +3323,48 @@ async function fetchFromGitHub() {
   } catch(e) {
     toast('⚠️ 불러오기 실패: ' + e.message);
   }
+}
+
+/* SCHEDULED SYNC (06:00 · 12:00 · 18:00 · 00:00) */
+const _SYNC_HOURS = [0, 6, 12, 18];
+
+function startScheduledSync() {
+  checkScheduledSync(); // 앱 열릴 때 즉시 확인 (놓친 정시 슬롯 처리)
+  setInterval(checkScheduledSync, 60 * 1000); // 1분마다 체크
+}
+
+async function checkScheduledSync() {
+  const s = getSettings();
+  const pat = lsGet('sa_github_pat');
+  if (!s.scheduledSync || !pat) return;
+
+  const now = new Date();
+  // 오늘 기준 이미 지난 정시 슬롯들
+  const passedSlots = _SYNC_HOURS
+    .map(h => { const d = new Date(now); d.setHours(h,0,0,0); return d; })
+    .filter(d => d <= now);
+  if (!passedSlots.length) return;
+
+  // 가장 최근에 지난 슬롯
+  const latestSlot = passedSlots[passedSlots.length - 1];
+  const lastSync = lsGet('sa_last_github_sync');
+  if (lastSync && new Date(lastSync) >= latestSlot) return; // 이미 동기화됨
+
+  const h = latestSlot.getHours();
+  try {
+    await syncToGitHub(false);
+    toast(`⏰ ${String(h).padStart(2,'0')}:00 정시 자동 동기화 완료`);
+    renderSettings();
+  } catch(e) {
+    // 정시 동기화 실패는 조용히 처리 (toast 없음)
+  }
+}
+
+function toggleScheduledSync() {
+  const s = getSettings();
+  s.scheduledSync = !s.scheduledSync;
+  saveSettings(s);
+  renderSettings();
 }
 
 /* EXPORT / IMPORT */
