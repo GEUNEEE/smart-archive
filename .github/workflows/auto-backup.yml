@@ -1,0 +1,52 @@
+name: Auto Backup (6·12·18·24시 KST)
+
+on:
+  schedule:
+    # KST = UTC+9  →  6시=21UTC, 12시=3UTC, 18시=9UTC, 0시=15UTC
+    - cron: '0 3,9,15,21 * * *'
+  workflow_dispatch:  # 수동 실행 가능
+
+permissions:
+  contents: write
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create backup if user_data.json exists
+        run: |
+          if [ ! -f "data/user_data.json" ]; then
+            echo "data/user_data.json 없음 — 백업 건너뜀"
+            exit 0
+          fi
+
+          # KST 타임스탬프
+          KST=$(TZ='Asia/Seoul' date '+%Y-%m-%d_%H%M')
+          DEST="backups/${KST}.json"
+          mkdir -p backups
+
+          cp data/user_data.json "$DEST"
+          echo "백업 생성: $DEST"
+
+          # 최근 24개(3일치)만 유지
+          ls -t backups/*.json 2>/dev/null | tail -n +25 | xargs -r rm --
+          echo "오래된 백업 정리 완료"
+
+      - name: Commit backup
+        run: |
+          git config user.name  "Smart Archive Bot"
+          git config user.email "noreply@github.com"
+          git add backups/ || true
+          if git diff --cached --quiet; then
+            echo "변경 없음 — 커밋 건너뜀"
+          else
+            KST=$(TZ='Asia/Seoul' date '+%Y-%m-%d %H:%M KST')
+            git commit -m "backup: auto snapshot ${KST}"
+            git push
+            echo "백업 커밋 완료"
+          fi

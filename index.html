@@ -1179,7 +1179,7 @@ function renderList() {
           <span class="badge" style="background:${ch.color}20;color:${ch.color}">${chName}</span>
           <span class="badge" style="background:#6366F120;color:#818CF8">${item.type||'바이럴'}</span>
           ${item.isBest?'<span class="best-badge">BEST</span>':''}
-          ${st!=='보관'?`<span class="badge" style="background:${stColor}20;color:${stColor};cursor:pointer" onclick="event.stopPropagation();cycleStatus('viral','${item.id}')">${st}</span>`:''}
+          <span class="badge" style="background:${stColor}20;color:${stColor};cursor:pointer" onclick="event.stopPropagation();cycleStatus('viral','${item.id}')">${st}</span>
         </div>
         <div class="card-title">${item.title}</div>
         <div class="card-meta">
@@ -1227,6 +1227,7 @@ function renderList() {
         <div class="card-badges">
           <span class="badge" style="background:#6366F120;color:#818CF8">${item.type||'메모'}</span>
           ${item.transcript ? '<span class="badge" style="background:#7C3AED20;color:#A78BFA">📄 전문</span>' : ''}
+          <span class="badge" style="background:${STATUS_COLORS[item.status||'보관']||'#888'}20;color:${STATUS_COLORS[item.status||'보관']||'#888'};cursor:pointer" onclick="event.stopPropagation();cycleStatus('memo','${item.id}')">${item.status||'보관'}</span>
         </div>
         <div class="card-title">${item.title}</div>
         <div class="card-meta"><span>${item.savedAt||''}</span></div>
@@ -1253,6 +1254,7 @@ function renderList() {
         <button class="card-del" onclick="event.stopPropagation();quickDelete('calls','${item.id}')">×</button>
         <div class="card-badges">
           <span class="badge" style="background:#10B98120;color:#10B981">${item.type||'미팅'}</span>
+          <span class="badge" style="background:${STATUS_COLORS[item.status||'보관']||'#888'}20;color:${STATUS_COLORS[item.status||'보관']||'#888'};cursor:pointer" onclick="event.stopPropagation();cycleStatus('calls','${item.id}')">${item.status||'보관'}</span>
         </div>
         <div class="card-title">${item.title}</div>
         <div class="card-meta">
