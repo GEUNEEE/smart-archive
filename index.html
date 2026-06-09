@@ -511,7 +511,9 @@ const DEFAULT_SETTINGS = {
   imageCategories: ['레퍼런스','콘텐츠아이디어','디자인','스크린샷','기타'],
   memoTypes: ['유튜브링크','인스타링크','스레드링크','틱톡링크','아이디어','생각정리','기타링크','메모','업무'],
   geminiApiKey: '',
-  groqApiKey: ''
+  groqApiKey: '',
+  autoGithubSync: false,
+  scheduledSync: true
 };
 
 /* ============================================================
@@ -877,13 +879,16 @@ function getData(key) { return lsGet(key) || []; }
 function getSettings() {
   const s = lsGet(KEYS.settings) || DEFAULT_SETTINGS;
   const defTypes = DEFAULT_SETTINGS.memoTypes;
+  let dirty = false;
   if (!s.memoTypes) {
-    s.memoTypes = defTypes;
-    saveSettings(s);
+    s.memoTypes = defTypes; dirty = true;
   } else {
     const missing = defTypes.filter(t => !s.memoTypes.includes(t));
-    if (missing.length) { s.memoTypes = [...s.memoTypes, ...missing]; saveSettings(s); }
+    if (missing.length) { s.memoTypes = [...s.memoTypes, ...missing]; dirty = true; }
   }
+  // 정시 자동 동기화 기본값 ON
+  if (s.scheduledSync === undefined) { s.scheduledSync = true; dirty = true; }
+  if (dirty) saveSettings(s);
   return s;
 }
 
@@ -1804,7 +1809,7 @@ function toggleBest(id) {
 }
 
 function cycleStatus(tab, id) {
-  const key = tab === 'viral' ? KEYS.viral : KEYS.memo;
+  const key = tab === 'viral' ? KEYS.viral : tab === 'calls' ? KEYS.calls : KEYS.memo;
   const arr = getData(key);
   const item = arr.find(i=>i.id===id);
   if (!item) return;
