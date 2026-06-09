@@ -115,8 +115,9 @@ a:hover{color:var(--accent-hover);}
 .select-mode .card-actions{display:none;}
 /* MOVE MENU POPOVER */
 .move-menu{position:fixed;z-index:9999;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.3);padding:4px;min-width:170px;max-height:360px;overflow-y:auto;}
-.move-menu-item{padding:7px 12px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--text-primary);}
+.move-menu-item{padding:7px 12px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--text-primary);touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
 .move-menu-item:hover{background:var(--bg-secondary);}
+.move-menu-item:active{background:var(--accent);color:#fff;}
 .move-menu-header{padding:6px 12px 2px;font-size:11px;color:var(--text-muted);font-weight:700;letter-spacing:.04em;text-transform:uppercase;}
 .move-menu-divider{height:1px;background:var(--border);margin:3px 4px;}
 /* DRAG STATE */
@@ -475,7 +476,7 @@ select.form-input{appearance:none;}
 /* ============================================================
    CONSTANTS & STORAGE KEYS
    ============================================================ */
-const APP_VERSION = '20260608-v5';
+const APP_VERSION = '20260609-v5.1';
 
 const PLATFORM_LABELS = {instagram:'인스타그램',youtube:'유튜브',tiktok:'틱톡',threads:'스레드',x:'X',web:'웹'};
 function platLabel(p){ return PLATFORM_LABELS[p]||p||''; }
@@ -756,14 +757,12 @@ function v5ToAppFormat(v5) {
 }
 
 function getAppKey(v5type) {
-  switch(v5type) {
-    case '바이럴': return 'viral';
-    case '메모':
-    case '업무':   return 'memo';
-    case '통화':
-    case '회의':   return 'calls';
-    default:       return null;
-  }
+  if (['바이럴','판매글','레퍼런스'].includes(v5type)) return 'viral';
+  if (['통화','회의'].includes(v5type)) return 'calls';
+  if (['이미지'].includes(v5type)) return null;  // IndexedDB 처리
+  // 메모, 업무 + 커스텀 memoTypes (유튜브링크, 틱톡링크 등) → memo
+  if (v5type) return 'memo';
+  return null;
 }
 
 function changeType(fromTab, id, newType) {
@@ -775,18 +774,22 @@ function changeType(fromTab, id, newType) {
   const toKey   = KEYS[toTab];
   const fromArr = getData(fromKey);
   const idx = fromArr.findIndex(i => i.id === id);
-  if (idx === -1) { toast('⚠️ 항목을 찾을 수 없습니다'); return; }
+  if (idx === -1) { toast('⚠️ 항목을 찾을 수 없습니다 (id:' + id + ')'); return; }
   const item = {...fromArr[idx], type: newType};
   if (fromKey === toKey) {
-    fromArr[idx] = item;
+    // 같은 탭 내 타입 변경: 맨 위로 이동 (splice + push → .reverse() 후 최상단)
+    fromArr.splice(idx, 1);
+    fromArr.push(item);
     saveData(fromKey, fromArr);
-    renderDetail(id);
+    selectedId = id;  // renderList 전에 설정해야 active 클래스 반영
     renderList();
+    renderSidebar();
+    renderDetail(id);
   } else {
+    // 다른 탭으로 이동: 목적 탭 최상단에 표시 (배열 끝 추가 → .reverse() 후 최상단)
     fromArr.splice(idx, 1);
     saveData(fromKey, fromArr);
     const toArr = getData(toKey);
-    // 목적 탭에서 최상단에 보이도록 배열 끝에 추가 (getFilteredItems가 .reverse()하므로)
     saveData(toKey, [...toArr, item]);
     selectedId = null;
     switchTab(toTab);
@@ -1917,7 +1920,7 @@ function confirmMove(fromTab, id, toTab) {
   saveData(fromKey, fromArr);
 
   const toArr = getData(toKey);
-  toArr.unshift(newItem);
+  toArr.push(newItem);  // 배열 끝 추가 → .reverse() 후 최상단 표시
   saveData(toKey, toArr);
 
   const tabLabels = {viral:'바이럴', memo:'메모함', calls:'통화기록'};
@@ -4117,7 +4120,8 @@ function showMoveMenu(e, fromTab, id) {
       const el = document.createElement('div');
       el.className = 'move-menu-item';
       el.textContent = type;
-      el.onclick = () => { closeMoveMenu(); changeType(fromTab, id, type); };
+      el.addEventListener('click', (ev) => { ev.stopPropagation(); closeMoveMenu(); changeType(fromTab, id, type); });
+      el.addEventListener('touchend', (ev) => { ev.preventDefault(); ev.stopPropagation(); closeMoveMenu(); changeType(fromTab, id, type); });
       menu.appendChild(el);
     });
   });
@@ -4138,7 +4142,8 @@ function showStatusMenu(e, tab, id) {
     const el = document.createElement('div');
     el.className = 'move-menu-item';
     el.textContent = LABELS[s];
-    el.onclick = () => { closeMoveMenu(); setStatus(tab, id, s); };
+    el.addEventListener('click', (ev) => { ev.stopPropagation(); closeMoveMenu(); setStatus(tab, id, s); });
+    el.addEventListener('touchend', (ev) => { ev.preventDefault(); ev.stopPropagation(); closeMoveMenu(); setStatus(tab, id, s); });
     menu.appendChild(el);
   });
   document.body.appendChild(menu);
