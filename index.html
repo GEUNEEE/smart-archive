@@ -775,7 +775,7 @@ function changeType(fromTab, id, newType) {
   const toKey   = KEYS[toTab];
   const fromArr = getData(fromKey);
   const idx = fromArr.findIndex(i => i.id === id);
-  if (idx === -1) return;
+  if (idx === -1) { toast('⚠️ 항목을 찾을 수 없습니다'); return; }
   const item = {...fromArr[idx], type: newType};
   if (fromKey === toKey) {
     fromArr[idx] = item;
@@ -786,11 +786,13 @@ function changeType(fromTab, id, newType) {
     fromArr.splice(idx, 1);
     saveData(fromKey, fromArr);
     const toArr = getData(toKey);
-    saveData(toKey, [item, ...toArr]);
+    // 목적 탭에서 최상단에 보이도록 배열 끝에 추가 (getFilteredItems가 .reverse()하므로)
+    saveData(toKey, [...toArr, item]);
     selectedId = null;
     switchTab(toTab);
   }
-  toast('유형 변경: ' + newType);
+  const tabLabel = {viral:'바이럴 탭', memo:'메모 탭', calls:'통화 탭'}[toTab] || toTab;
+  toast(`✅ "${newType}"(으)로 이동 → ${tabLabel}`);
 }
 
 function savePlatform(id, val) {
@@ -4249,7 +4251,7 @@ function batchMove(toTab) {
     const newItem = buildMovedItem(currentTab, toTab, src);
     if (!newItem) return;
     fromArr.splice(idx, 1);
-    toArr.unshift(newItem);
+    toArr.push(newItem);
     moved++;
   });
   saveData(fromKey, fromArr);
