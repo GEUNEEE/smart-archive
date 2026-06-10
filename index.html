@@ -521,6 +521,7 @@ const DEFAULT_SETTINGS = {
    ============================================================ */
 let currentTab = 'viral';
 let currentFilter = {type:'전체', channel:'전체', category:'전체', status:'전체', tags:[], search:'', dateFrom:'', dateTo:''};
+let currentSort = 'desc'; // 'desc' = 최신순, 'asc' = 오래된순
 let selectedId = null;
 let formType = 'viral';
 let addImageFiles = [];
@@ -1060,9 +1061,13 @@ function renderSidebar() {
     html += sidebarSection('카테고리', [{label:'전체',value:'전체'}, ...(s.imageCategories||DEFAULT_SETTINGS.imageCategories).map(t=>({label:t,value:t}))], 'category');
   }
 
-  // 날짜 필터
+  // 날짜 정렬 + 필터
   html += `<div class="sidebar-section">
     <div class="sidebar-label">날짜</div>
+    <div style="display:flex;gap:4px;margin-bottom:8px">
+      <button onclick="setSort('desc')" style="flex:1;padding:5px 0;font-size:12px;border-radius:6px;border:1px solid var(--border);cursor:pointer;transition:all .15s;${currentSort==='desc'?'background:var(--accent);color:#fff;border-color:var(--accent)':'background:var(--bg-secondary);color:var(--text-muted)'}">↓ 최신순</button>
+      <button onclick="setSort('asc')"  style="flex:1;padding:5px 0;font-size:12px;border-radius:6px;border:1px solid var(--border);cursor:pointer;transition:all .15s;${currentSort==='asc' ?'background:var(--accent);color:#fff;border-color:var(--accent)':'background:var(--bg-secondary);color:var(--text-muted)'}">↑ 오래된순</button>
+    </div>
     <div style="display:flex;flex-direction:column;gap:5px;padding:2px 0">
       <div style="display:flex;align-items:center;gap:6px">
         <span style="font-size:11px;color:var(--text-muted);width:22px">시작</span>
@@ -1093,6 +1098,12 @@ function setDateFilter(side, val) {
 function clearDateFilter() {
   currentFilter.dateFrom = '';
   currentFilter.dateTo = '';
+  renderSidebar();
+  renderList();
+}
+
+function setSort(dir) {
+  currentSort = dir;
   renderSidebar();
   renderList();
 }
@@ -1200,7 +1211,16 @@ function getFilteredItems() {
     );
   }
 
-  return items.slice().reverse();
+  // 날짜 기준 정렬 (date > collectedAt > savedAt 우선순위)
+  const getDate = i => (i.date || i.collectedAt || i.savedAt || '').slice(0, 10);
+  items = items.slice().sort((a, b) => {
+    const da = getDate(a), db = getDate(b);
+    if (!da && !db) return 0;
+    if (!da) return 1;
+    if (!db) return -1;
+    return currentSort === 'asc' ? da.localeCompare(db) : db.localeCompare(da);
+  });
+  return items;
 }
 
 function renderList() {
