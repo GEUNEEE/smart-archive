@@ -520,7 +520,7 @@ const DEFAULT_SETTINGS = {
    STATE
    ============================================================ */
 let currentTab = 'viral';
-let currentFilter = {type:'전체', channel:'전체', category:'전체', status:'전체', tags:[], search:''};
+let currentFilter = {type:'전체', channel:'전체', category:'전체', status:'전체', tags:[], search:'', dateFrom:'', dateTo:''};
 let selectedId = null;
 let formType = 'viral';
 let addImageFiles = [];
@@ -1060,7 +1060,41 @@ function renderSidebar() {
     html += sidebarSection('카테고리', [{label:'전체',value:'전체'}, ...(s.imageCategories||DEFAULT_SETTINGS.imageCategories).map(t=>({label:t,value:t}))], 'category');
   }
 
+  // 날짜 필터
+  html += `<div class="sidebar-section">
+    <div class="sidebar-label">날짜</div>
+    <div style="display:flex;flex-direction:column;gap:5px;padding:2px 0">
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:11px;color:var(--text-muted);width:22px">시작</span>
+        <input type="date" id="filter-date-from" value="${currentFilter.dateFrom}"
+          onchange="setDateFilter('from',this.value)"
+          style="flex:1;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:4px 6px;font-size:12px;outline:none">
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:11px;color:var(--text-muted);width:22px">종료</span>
+        <input type="date" id="filter-date-to" value="${currentFilter.dateTo}"
+          onchange="setDateFilter('to',this.value)"
+          style="flex:1;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:4px 6px;font-size:12px;outline:none">
+      </div>
+      ${(currentFilter.dateFrom||currentFilter.dateTo)?`<button onclick="clearDateFilter()" style="font-size:11px;color:var(--text-muted);background:none;border:none;cursor:pointer;text-align:left;padding:0;margin-top:2px">✕ 날짜 초기화</button>`:''}
+    </div>
+  </div>`;
+
   document.getElementById('sidebar-content').innerHTML = html;
+}
+
+function setDateFilter(side, val) {
+  if (side === 'from') currentFilter.dateFrom = val;
+  else currentFilter.dateTo = val;
+  renderSidebar();
+  renderList();
+}
+
+function clearDateFilter() {
+  currentFilter.dateFrom = '';
+  currentFilter.dateTo = '';
+  renderSidebar();
+  renderList();
 }
 
 function sidebarSection(title, items, filterKey) {
@@ -1144,6 +1178,16 @@ function getFilteredItems() {
 
   if (currentFilter.tags.length > 0) {
     items = items.filter(i => currentFilter.tags.every(t => (i.tags||[]).includes(t)));
+  }
+
+  if (currentFilter.dateFrom || currentFilter.dateTo) {
+    items = items.filter(i => {
+      const d = (i.date || i.collectedAt || i.savedAt || '').slice(0,10);
+      if (!d) return true;
+      if (currentFilter.dateFrom && d < currentFilter.dateFrom) return false;
+      if (currentFilter.dateTo   && d > currentFilter.dateTo)   return false;
+      return true;
+    });
   }
 
   if (s) {
