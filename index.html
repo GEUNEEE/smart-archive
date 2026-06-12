@@ -520,7 +520,7 @@ const DEFAULT_SETTINGS = {
    STATE
    ============================================================ */
 let currentTab = 'viral';
-let currentFilter = {type:'전체', channel:'전체', category:'전체', status:'전체', tags:[], search:'', dateFrom:'', dateTo:''};
+let currentFilter = {type:'전체', channel:'전체', category:'전체', status:'전체', tags:[], search:'', dateFrom:'', dateTo:'', rating:0};
 let currentSort = 'desc'; // 'desc' = 최신순, 'asc' = 오래된순
 let selectedId = null;
 let formType = 'viral';
@@ -1061,6 +1061,17 @@ function renderSidebar() {
     html += sidebarSection('카테고리', [{label:'전체',value:'전체'}, ...(s.imageCategories||DEFAULT_SETTINGS.imageCategories).map(t=>({label:t,value:t}))], 'category');
   }
 
+  // 별점 필터
+  html += `<div class="sidebar-section"><div class="sidebar-label">별점</div>`;
+  const ratingOpts = [{v:0,l:'전체'},{v:1,l:'★'},{v:2,l:'★★'},{v:3,l:'★★★'},{v:4,l:'★★★★'},{v:5,l:'★★★★★'}];
+  ratingOpts.forEach(({v,l}) => {
+    const active = currentFilter.rating === v;
+    html += `<div class="sidebar-item${active?' active':''}" onclick="setFilter('rating',${v})" style="font-size:${v===0?'13px':'14px'};letter-spacing:${v>0?'1px':'0'};color:${v>0&&active?'#F59E0B':v>0?'#F59E0B99':''}">
+      ${v > 0 ? `<span style="color:#F59E0B">${l}</span>${v<5?' 이상':''}` : l}
+    </div>`;
+  });
+  html += `</div>`;
+
   // 날짜 정렬 + 필터
   html += `<div class="sidebar-section">
     <div class="sidebar-label">날짜</div>
@@ -1191,6 +1202,10 @@ function getFilteredItems() {
     items = items.filter(i => currentFilter.tags.every(t => (i.tags||[]).includes(t)));
   }
 
+  if (currentFilter.rating > 0) {
+    items = items.filter(i => (i.rating || 0) >= currentFilter.rating);
+  }
+
   if (currentFilter.dateFrom || currentFilter.dateTo) {
     items = items.filter(i => {
       const d = (i.date || i.collectedAt || i.savedAt || '').slice(0,10);
@@ -1256,6 +1271,7 @@ function renderList() {
           <span>${item.originalDate||item.collectedAt||''}</span>
         </div>
         <div class="card-stats">👁 ${fmtNum(item.views)} · ❤️ ${fmtNum(item.likes)} · 💬 ${fmtNum(item.comments)}</div>
+        <div style="margin:4px 0 2px;line-height:1" onclick="event.stopPropagation()">${starsHtml('viral',item.id,item.rating)}</div>
         <div class="card-tags" onclick="event.stopPropagation()">
           ${(item.tags||[]).map((t,ti)=>`<span class="card-tag-chip" onclick="removeCardTag(event,'viral','${item.id}',${ti})">${t.replace(/</g,'&lt;')} <span class="del">×</span></span>`).join('')}
           <span class="card-tag-add" onclick="openCTP(event,'viral','${item.id}',this)">+ 태그</span>
@@ -1300,6 +1316,7 @@ function renderList() {
         </div>
         <div class="card-title">${item.title}</div>
         <div class="card-meta"><span>${item.savedAt||''}</span></div>
+        <div style="margin:4px 0 2px;line-height:1" onclick="event.stopPropagation()">${starsHtml('memo',item.id,item.rating)}</div>
         ${ytBtn}
         <div class="card-tags" onclick="event.stopPropagation()">
           ${(item.tags||[]).map((t,ti)=>`<span class="card-tag-chip" onclick="removeCardTag(event,'memo','${item.id}',${ti})">${t.replace(/</g,'&lt;')} <span class="del">×</span></span>`).join('')}
@@ -1331,6 +1348,7 @@ function renderList() {
           <span>👥 ${(item.attendees||[]).length}명</span>
           <span>${item.date||''}</span>
         </div>
+        <div style="margin:4px 0 2px;line-height:1" onclick="event.stopPropagation()">${starsHtml('calls',item.id,item.rating)}</div>
         <div class="card-tags" onclick="event.stopPropagation()">
           ${(item.tags||[]).map((t,ti)=>`<span class="card-tag-chip" onclick="removeCardTag(event,'calls','${item.id}',${ti})">${t.replace(/</g,'&lt;')} <span class="del">×</span></span>`).join('')}
           <span class="card-tag-add" onclick="openCTP(event,'calls','${item.id}',this)">+ 태그</span>
@@ -1870,6 +1888,27 @@ function toggleBest(id) {
     renderList();
     toast(item.isBest ? '⭐ BEST 설정됨' : 'BEST 해제됨');
   }
+}
+
+function starsHtml(tab, id, rating) {
+  const r = rating || 0;
+  return Array.from({length:5}, (_,i) => {
+    const filled = i < r;
+    return `<span style="font-size:14px;cursor:pointer;color:${filled?'#F59E0B':'#555'};transition:color .1s"
+      onclick="event.stopPropagation();setRating('${tab}','${id}',${filled&&r===i+1?0:i+1})"
+      title="${i+1}점${filled&&r===i+1?' (클릭으로 초기화)':''}">${filled?'★':'☆'}</span>`;
+  }).join('');
+}
+
+function setRating(tab, id, stars) {
+  const key = tab === 'viral' ? KEYS.viral : tab === 'calls' ? KEYS.calls : KEYS.memo;
+  const arr = getData(key);
+  const item = arr.find(i => i.id === id);
+  if (!item) return;
+  item.rating = stars;
+  saveData(key, arr);
+  renderList();
+  if (selectedId === id) renderDetail(id);
 }
 
 function cycleStatus(tab, id) {
