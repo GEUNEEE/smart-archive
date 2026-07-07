@@ -472,7 +472,7 @@ select.form-input{appearance:none;}
 /* ============================================================
    CONSTANTS & STORAGE KEYS
    ============================================================ */
-const APP_VERSION = '20260707-v5.2';
+const APP_VERSION = '20260707-v5.3';
 
 const PLATFORM_LABELS = {instagram:'인스타그램',youtube:'유튜브',tiktok:'틱톡',threads:'스레드',x:'X',web:'웹'};
 function platLabel(p){ return PLATFORM_LABELS[p]||p||''; }
@@ -3155,7 +3155,7 @@ function renderSettings() {
       </label>
       <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin-bottom:8px">
         <input type="checkbox" ${s.scheduledSync?'checked':''} onchange="toggleScheduledSync()">
-        📅 정시 자동 동기화 (6·12·18·24시)
+        📅 정시 자동 동기화 (00·06·12·18시)
       </label>
       <div style="font-size:12px;color:var(--text-muted)">
         마지막 동기화: ${lsGet('sa_last_github_sync') ? lsGet('sa_last_github_sync').slice(0,16).replace('T',' ') : '없음'}
@@ -3542,21 +3542,20 @@ async function checkScheduledSync() {
   if (!s.scheduledSync || !pat) return;
 
   const now = new Date();
-  // 오늘 기준 이미 지난 정시 슬롯들
-  const passedSlots = _SYNC_HOURS
-    .map(h => { const d = new Date(now); d.setHours(h,0,0,0); return d; })
-    .filter(d => d <= now);
-  if (!passedSlots.length) return;
+  // 오늘 기준 이미 지난 정시 슬롯 중 가장 최근 것
+  const passedHours = _SYNC_HOURS.filter(h => h <= now.getHours());
+  if (!passedHours.length) return;
+  const h = passedHours[passedHours.length - 1];
 
-  // 가장 최근에 지난 슬롯
-  const latestSlot = passedSlots[passedSlots.length - 1];
-  const lastSync = lsGet('sa_last_github_sync');
-  if (lastSync && new Date(lastSync) >= latestSlot) return; // 이미 동기화됨
+  // 날짜+슬롯 단위 키로 중복 실행 방지 (타임스탬프 비교보다 견고함)
+  const slotKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}-${h}`;
+  if (lsGet('sa_last_sync_slot') === slotKey) return; // 이 슬롯은 이미 동기화됨
 
-  const h = latestSlot.getHours();
   try {
     await syncToGitHub(false);
-    toast(`⏰ ${String(h).padStart(2,'0')}:00 정시 자동 동기화 완료`);
+    lsSet('sa_last_sync_slot', slotKey);
+    const nowLabel = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    toast(`⏰ ${String(h).padStart(2,'0')}:00 정시 자동 동기화 완료 (현재 ${nowLabel})`);
     renderSettings();
   } catch(e) {
     // 정시 동기화 실패는 조용히 처리 (toast 없음)
