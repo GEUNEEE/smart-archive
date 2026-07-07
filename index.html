@@ -65,9 +65,12 @@ a:hover{color:var(--accent-hover);}
 /* TAB NAV */
 .tabnav{height:46px;background:var(--bg-secondary);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 8px;gap:2px;flex-shrink:0;overflow-x:auto;}
 .tabnav::-webkit-scrollbar{display:none;}
-.tab-btn{padding:8px 14px;border-radius:6px;color:var(--text-muted);font-size:13px;font-weight:500;white-space:nowrap;background:transparent;transition:all .2s;}
+.tab-btn{padding:8px 14px;border-radius:6px;color:var(--text-muted);font-size:13px;font-weight:500;white-space:nowrap;background:transparent;transition:all .2s;cursor:grab;user-select:none;}
+.tab-btn:active{cursor:grabbing;}
 .tab-btn:hover{color:var(--text-primary);background:var(--bg-card);}
 .tab-btn.active{color:var(--accent);background:var(--bg-card);}
+.tab-btn.dragging{opacity:.4;}
+.tab-btn.tab-reorder-over{outline:2px dashed var(--accent);outline-offset:-2px;}
 /* MAIN LAYOUT */
 .main-area{display:flex;flex:1;overflow:hidden;}
 /* SIDEBAR */
@@ -371,14 +374,7 @@ select.form-input{appearance:none;}
     <button class="topbar-btn" onclick="doLogout()">로그아웃</button>
   </div>
   <!-- TAB NAV -->
-  <div class="tabnav">
-    <button class="tab-btn active" data-tab="viral" onclick="switchTab('viral')">📊 바이럴 아카이브</button>
-    <button class="tab-btn" data-tab="memo" onclick="switchTab('memo')">💬 나의 메모함</button>
-    <button class="tab-btn" data-tab="calls" onclick="switchTab('calls')">📞 통화 기록</button>
-    <button class="tab-btn" data-tab="images" onclick="switchTab('images')">🖼 이미지 보관함</button>
-    <button class="tab-btn" data-tab="add" onclick="switchTab('add')">➕ 새로 추가</button>
-    <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">⚙️ 설정</button>
-  </div>
+  <div class="tabnav" id="tabnav"></div>
   <!-- MAIN AREA -->
   <div class="main-area">
     <!-- SIDEBAR -->
@@ -476,7 +472,7 @@ select.form-input{appearance:none;}
 /* ============================================================
    CONSTANTS & STORAGE KEYS
    ============================================================ */
-const APP_VERSION = '20260609-v5.1';
+const APP_VERSION = '20260707-v5.2';
 
 const PLATFORM_LABELS = {instagram:'인스타그램',youtube:'유튜브',tiktok:'틱톡',threads:'스레드',x:'X',web:'웹'};
 function platLabel(p){ return PLATFORM_LABELS[p]||p||''; }
@@ -510,6 +506,7 @@ const DEFAULT_SETTINGS = {
   callTypes: ['미팅','상담','브레인스토밍','업무협의','기타'],
   imageCategories: ['레퍼런스','콘텐츠아이디어','디자인','스크린샷','기타'],
   memoTypes: ['유튜브링크','인스타링크','스레드링크','틱톡링크','아이디어','생각정리','기타링크','메모','업무'],
+  tabOrder: ['memo','viral','calls','images','add','settings'],
   geminiApiKey: '',
   groqApiKey: '',
   autoGithubSync: false,
@@ -519,7 +516,16 @@ const DEFAULT_SETTINGS = {
 /* ============================================================
    STATE
    ============================================================ */
-let currentTab = 'viral';
+let currentTab = 'memo';
+let tabDragSrc = null;
+const TAB_DEFS = {
+  memo:     {icon:'💬', label:'나의 메모함'},
+  viral:    {icon:'📊', label:'바이럴 아카이브'},
+  calls:    {icon:'📞', label:'통화 기록'},
+  images:   {icon:'🖼', label:'이미지 보관함'},
+  add:      {icon:'➕', label:'새로 추가'},
+  settings: {icon:'⚙️', label:'설정'}
+};
 let currentFilter = {type:'전체', channel:'전체', category:'전체', status:'전체', tags:[], search:'', dateFrom:'', dateTo:'', rating:0};
 let currentSort = 'desc'; // 'desc' = 최신순, 'asc' = 오래된순
 let selectedId = null;
@@ -539,8 +545,8 @@ let _autoBackupTimer = null;
 async function init() {
   idb = await openIDB();
   checkTheme();
+  renderTabNav();
   checkAuth();
-  setupTabDropTargets();
   document.addEventListener('click', e => {
     const picker = document.getElementById('card-tag-picker');
     if (picker && !picker.contains(e.target)) closeCTP();
@@ -613,7 +619,7 @@ function doLogout() {
 function showApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
-  switchTab('viral');
+  switchTab(currentTab);
   updateStats();
   setTimeout(autoImportFromServer, 1200);
   setTimeout(fetchArchive, 1500);
@@ -889,6 +895,12 @@ function getSettings() {
   }
   // 정시 자동 동기화 기본값 ON
   if (s.scheduledSync === undefined) { s.scheduledSync = true; dirty = true; }
+  if (!s.tabOrder || !Array.isArray(s.tabOrder) || !s.tabOrder.length) {
+    s.tabOrder = [...DEFAULT_SETTINGS.tabOrder]; dirty = true;
+  } else {
+    const missingTabs = DEFAULT_SETTINGS.tabOrder.filter(t => !s.tabOrder.includes(t));
+    if (missingTabs.length) { s.tabOrder = [...s.tabOrder, ...missingTabs]; dirty = true; }
+  }
   if (dirty) saveSettings(s);
   return s;
 }
@@ -989,6 +1001,60 @@ function updateStats() {
 /* ============================================================
    TAB SWITCHING
    ============================================================ */
+function renderTabNav() {
+  const s = getSettings();
+  const order = (s.tabOrder && s.tabOrder.length) ? s.tabOrder : DEFAULT_SETTINGS.tabOrder;
+  document.getElementById('tabnav').innerHTML = order.filter(id => TAB_DEFS[id]).map(id => {
+    const def = TAB_DEFS[id];
+    const active = id === currentTab ? ' active' : '';
+    return `<button class="tab-btn${active}" data-tab="${id}" draggable="true"
+      onclick="switchTab('${id}')"
+      ondragstart="onTabDragStart(event,'${id}')"
+      ondragover="onTabDragOver(event,'${id}')"
+      ondragleave="onTabDragLeave(event)"
+      ondrop="onTabDrop(event,'${id}')"
+      ondragend="onTabDragEnd(event)">${def.icon} ${def.label}</button>`;
+  }).join('');
+  setupTabDropTargets();
+}
+
+function onTabDragStart(e, tabId) {
+  tabDragSrc = tabId;
+  e.dataTransfer.effectAllowed = 'move';
+  e.currentTarget.classList.add('dragging');
+}
+function onTabDragOver(e, tabId) {
+  if (!tabDragSrc || tabDragSrc === tabId) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('.tab-btn.tab-reorder-over').forEach(el => el.classList.remove('tab-reorder-over'));
+  e.currentTarget.classList.add('tab-reorder-over');
+}
+function onTabDragLeave(e) {
+  e.currentTarget.classList.remove('tab-reorder-over');
+}
+function onTabDrop(e, tabId) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('tab-reorder-over');
+  if (!tabDragSrc || tabDragSrc === tabId) { tabDragSrc = null; return; }
+  const s = getSettings();
+  const order = [...((s.tabOrder && s.tabOrder.length) ? s.tabOrder : DEFAULT_SETTINGS.tabOrder)];
+  const fromIdx = order.indexOf(tabDragSrc);
+  const toIdx = order.indexOf(tabId);
+  if (fromIdx === -1 || toIdx === -1) { tabDragSrc = null; return; }
+  order.splice(fromIdx, 1);
+  order.splice(toIdx, 0, tabDragSrc);
+  s.tabOrder = order;
+  saveSettings(s);
+  tabDragSrc = null;
+  renderTabNav();
+  toast('탭 순서가 변경되었습니다');
+}
+function onTabDragEnd(e) {
+  tabDragSrc = null;
+  document.querySelectorAll('.tab-btn.dragging, .tab-btn.tab-reorder-over').forEach(el => el.classList.remove('dragging','tab-reorder-over'));
+}
+
 function switchTab(tab) {
   exitSelectMode();
   currentTab = tab;
