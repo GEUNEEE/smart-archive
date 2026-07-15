@@ -18,3 +18,10 @@ agents/archive_import_*.json
 agents/threads_debug*.html
 agents/debug_*.py
 agents/analyze_html.py
+agents/*_backup_*.json
+data/*_backup_*.json
+
+# 버전별 설계 문서 스크래치 (최종본만 관리 시 여기서 제외 해제)
+smart_archive_최종설계서_v3.md
+smart_archive_최종설계서_v4.md
+agents/스마트아카이브_v5_디벨롭_명세서.md
