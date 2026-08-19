@@ -27,7 +27,7 @@ from agents.to_archive import append_to_archive
 
 
 def extract_video_id(url: str) -> str | None:
-    m = re.search(r"(?:youtu\.be/|[?&]v=|shorts/|embed/)([A-Za-z0-9_-]{11})", url)
+    m = re.search(r"(?:youtu\.be/|[?&]v=|shorts/|embed/|live/)([A-Za-z0-9_-]{11})", url)
     return m.group(1) if m else None
 
 
